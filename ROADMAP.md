@@ -5,7 +5,7 @@
 
 ---
 
-## Етап 0. Каркас проєкту [~]
+## Етап 0. Каркас проєкту [x]
 Мета: порожній додаток відкривається за посиланням на iPad і iPhone.
 - Vite + TypeScript + Three.js, структура папок як у CLAUDE.md
 - Vitest і Playwright (профілі iPad landscape та iPhone 15 Pro Max)
@@ -19,10 +19,10 @@
 - Тести проходять у GitHub Actions
 
 **Нотатки**
-- Адреса: https://khromenkoyegor-star.github.io/duct-route-3d/ (працює після першого злиття в `main` і ввімкнення Pages: Settings → Pages → Source: GitHub Actions).
+- Адреса: https://khromenkoyegor-star.github.io/duct-route-3d/ (Pages увімкнено: Settings → Pages → Source: GitHub Actions).
 - Зроблено: сцена (сітка 10 × 10 м, клітинка 1000 мм; осі X/Y/Z по 1000 мм з підписами; базове обертання — повне керування камерою на етапі 1), світла/темна тема, safe areas, версія збірки в панелі назви; PWA (manifest, іконка, meta для iOS); тестова кімната `tests/fixtures/room-4000x2700x3000.glb`; Vitest + Playwright (iPad landscape, iPhone 15 Pro Max вертикально й горизонтально); CI з публікацією на Pages.
 - Service worker (робота без інтернету) свідомо не додавали — див. «Ідеї на потім».
-- Лишилось: перевірка Єгором на iPad і iPhone.
+- Закрито 08.11.2026: PR #1, тести зелені в GitHub Actions (WebKit), публікація на Pages пройшла; Єгор перевірив на iPad — «етап 0 ок».
 
 ---
 
