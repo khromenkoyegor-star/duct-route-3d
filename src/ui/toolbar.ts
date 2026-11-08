@@ -21,6 +21,8 @@ function makeButton(id: string, icon: string, label: string, onClick: () => void
   button.dataset.testid = id;
   button.innerHTML = `${icon}<span class="tool-label"></span>`;
   button.querySelector('.tool-label')!.textContent = label;
+  // На вузьких екранах видно лише іконку — назва лишається для VoiceOver.
+  button.setAttribute('aria-label', label);
   button.addEventListener('click', onClick);
   return button;
 }
@@ -52,6 +54,8 @@ export function createToolbar(handlers: ToolbarHandlers): Toolbar {
     element,
     setScanLoaded(loaded) {
       scanLoaded = loaded;
+      // Головна дія без скану — відкрити; коли скан є, кнопка стає звичайною.
+      open.classList.toggle('tool-button--primary', !loaded);
       sync();
     },
     setRulerActive(active) {

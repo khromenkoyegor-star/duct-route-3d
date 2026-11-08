@@ -2,7 +2,8 @@
 
 export interface Progress {
   element: HTMLElement;
-  show(text: string): void;
+  /** detail — другий рядок дрібніше (наприклад, розмір файлу). */
+  show(text: string, detail?: string): void;
   hide(): void;
 }
 
@@ -20,12 +21,16 @@ export function createProgress(): Progress {
   spinner.setAttribute('aria-hidden', 'true');
   const label = document.createElement('p');
   label.className = 'card-text';
-  card.append(spinner, label);
+  const detailLine = document.createElement('p');
+  detailLine.className = 'card-detail';
+  card.append(spinner, label, detailLine);
   backdrop.append(card);
   return {
     element: backdrop,
-    show(text) {
+    show(text, detail) {
       label.textContent = text;
+      detailLine.textContent = detail ?? '';
+      detailLine.hidden = !detail;
       backdrop.hidden = false;
     },
     hide() {

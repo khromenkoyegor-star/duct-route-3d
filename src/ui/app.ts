@@ -1,8 +1,16 @@
 /**
  * Збирає інтерфейс етапу 1: відкриття скану, «Показати все», інформація про скан, рулетка.
  */
-import { type DeviceClass, describeScan, MAX_TEXTURE_SIDE, type ScanInfo } from '../core/scan-info';
-import { type LoadedScan, type LoadPhase, loadScan, ScanLoadError, type ScanFile } from '../scene/scan-loader';
+import { type DeviceClass, describeScan, formatBytes, MAX_TEXTURE_SIDE, type ScanInfo } from '../core/scan-info';
+import {
+  buildScan,
+  type LoadedScan,
+  type LoadPhase,
+  prepareScan,
+  type PreparedScan,
+  ScanLoadError,
+  type ScanFile,
+} from '../scene/scan-loader';
 import { GRID_CELL_MM, type Viewer } from '../scene/viewer';
 import { createAlert, createProgress } from './dialogs';
 import { createLegend, createTitle } from './hud';
@@ -57,8 +65,11 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   const progress = createProgress();
   const alert = createAlert();
 
-  const ruler = createRuler(viewer, (rulerState) => {
-    state.ruler = rulerState;
+  const ruler = createRuler(viewer, {
+    onChange: (rulerState) => {
+      state.ruler = rulerState;
+    },
+    onDone: () => setRuler(false),
   });
 
   const toolbar = createToolbar({
@@ -79,29 +90,41 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
 
   async function openFiles(files: readonly ScanFile[]): Promise<void> {
     if (files.length === 0 || state.status === 'loading') return;
+    const previousStatus = state.status;
     state.status = 'loading';
     state.error = null;
     toolbar.setBusy(true);
     setRuler(false);
+    const sizeText = formatBytes(files.reduce((sum, f) => sum + f.size, 0));
+    const showPhase = (phase: LoadPhase) => progress.show(PHASE_TEXT[phase], sizeText);
+    showPhase('reading');
 
-    // Спершу звільняємо пам'ять від попереднього скану — інакше два великі скани
-    // одночасно можуть не вміститися в пам'ять iPhone.
-    if (scan) {
-      viewer.setScan(null);
-      scan.dispose();
-      scan = null;
-    }
-    state.scanName = null;
-    state.scanInfo = null;
-    title.showScan(null, null);
-    toolbar.setScanLoaded(false);
-
-    progress.show(PHASE_TEXT.reading);
+    let closedPrevious = false;
     try {
-      const loaded = await loadScan(files, {
-        maxTextureSide: MAX_TEXTURE_SIDE[device],
-        onPhase: (phase) => progress.show(PHASE_TEXT[phase]),
-      });
+      // 1. Швидка перевірка: якщо вибрано не той файл — уже відкритий скан лишається.
+      let prepared: PreparedScan;
+      try {
+        prepared = await prepareScan(files, showPhase);
+      } catch (error) {
+        state.status = previousStatus;
+        throw error;
+      }
+
+      // 2. Звільняємо пам'ять від попереднього скану — два великі скани одночасно
+      //    можуть не вміститися в пам'ять iPhone.
+      if (scan) {
+        viewer.setScan(null);
+        scan.dispose();
+        scan = null;
+        closedPrevious = true;
+      }
+      state.scanName = null;
+      state.scanInfo = null;
+      title.showScan(null, null);
+      toolbar.setScanLoaded(false);
+
+      // 3. Будуємо 3D.
+      const loaded = await buildScan(prepared, { maxTextureSide: MAX_TEXTURE_SIDE[device], onPhase: showPhase });
       scan = loaded;
       viewer.setScan(loaded.root);
       viewer.showAll('default');
@@ -113,13 +136,14 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       toolbar.setScanLoaded(true);
     } catch (error) {
       console.error(error);
-      state.status = 'idle';
-      const message =
+      if (closedPrevious || !scan) state.status = 'idle';
+      let message =
         error instanceof ScanLoadError
           ? error.message
           : 'Невідома помилка. Можливо, скан завеликий для цього пристрою — спробуйте менший або відкрийте на iPad.';
+      if (closedPrevious) message += ' Попередній скан закрито — відкрийте його знову.';
       state.error = message;
-      viewer.showAll('default');
+      if (!scan) viewer.showAll('default');
       alert.show('Не вдалося відкрити скан', message);
     } finally {
       progress.hide();

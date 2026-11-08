@@ -58,7 +58,7 @@ test.describe('Етап 1: відкриття скану', () => {
     expect(Math.abs(s.scanInfo.sizeMm.z - 3000)).toBeLessThan(0.1);
 
     await expect(page.getByTestId('scan-name')).toHaveText('room-4000x2700x3000.zip');
-    await expect(page.getByTestId('scan-size')).toHaveText(/Габарит: 4\s000 × 2\s700 × 3\s000 мм/);
+    await expect(page.getByTestId('scan-size')).toHaveText(/^Габарит: X 4\s000 · Y 2\s700 · Z 3\s000 мм$/);
     await expect(page.getByTestId('scan-stats')).toContainText('12 трикутників');
     await expect(page.getByTestId('scan-warnings')).toBeHidden();
     await expect(page.getByTestId('ruler')).toBeEnabled();
@@ -173,6 +173,33 @@ test.describe('Етап 1: зрозумілі помилки', () => {
   }
 });
 
+test.describe('Етап 1: помилка не закриває відкритий скан', () => {
+  test('вибрали фото після кімнати — кімната лишається на екрані', async ({ page }) => {
+    await openApp(page);
+    await chooseFiles(page, ROOM_ZIP);
+    await chooseFiles(page, { name: 'IMG_0002.HEIC', mimeType: 'image/heic', buffer: Buffer.from('not a scan at all') });
+    await expect(page.getByTestId('alert')).toBeVisible();
+    await expect(page.getByTestId('alert-text')).not.toHaveText(/Попередній скан закрито/);
+    const s = await state(page);
+    expect(s.status).toBe('ready');
+    expect(s.scanName).toBe('room-4000x2700x3000.zip');
+    expect(await page.evaluate(() => window.__trasa!.viewer.scanBox() !== null)).toBe(true);
+    await expect(page.getByTestId('ruler')).toBeEnabled();
+  });
+
+  test('USDZ/OBJ замість GLTF — конкретна підказка', async ({ page }) => {
+    await openApp(page);
+    // USDZ насправді теж ZIP (усередині .usdc) — підказка має бути про USDZ.
+    const { writeZip } = await import('../fixtures/zip-writer.ts');
+    const usdz = writeZip([{ name: 'Room.usdc', data: new Uint8Array([80, 88, 82, 45, 85, 83, 68, 67]), method: 0 }]);
+    await chooseFiles(page, { name: 'Room.usdz', mimeType: 'model/vnd.usdz+zip', buffer: Buffer.from(usdz) });
+    await expect(page.getByTestId('alert-text')).toHaveText(/Це файл USDZ.*виберіть експорт GLTF/);
+    await page.getByRole('button', { name: 'Зрозуміло' }).click();
+    await chooseFiles(page, { name: 'Room.obj', mimeType: 'text/plain', buffer: Buffer.from('v 0 0 0') });
+    await expect(page.getByTestId('alert-text')).toHaveText(/Це файл OBJ/);
+  });
+});
+
 test.describe('Етап 1: «Показати все»', () => {
   test('після відкриття і після кнопки весь скан у кадрі', async ({ page }) => {
     await openApp(page);
@@ -251,7 +278,7 @@ test.describe('Етап 1: «Рулетка»', () => {
     await startRuler(page);
     const sky = await project(page, { x: 0, y: 3.5, z: 0 }); // над стелею — поверхні немає
     await page.mouse.click(sky.x, sky.y);
-    await expect(page.getByTestId('ruler-text')).toHaveText(/немає поверхні скану/);
+    await expect(page.getByTestId('ruler-sub')).toHaveText(/немає поверхні скану/);
     expect((await state(page)).ruler.points).toHaveLength(0);
 
     for (const p of [
@@ -266,9 +293,31 @@ test.describe('Етап 1: «Рулетка»', () => {
     expect(s.ruler.points).toHaveLength(1);
     expect(s.ruler.distanceMm).toBeNull();
 
-    await page.getByTestId('ruler').click();
+    await page.getByTestId('ruler-done').click();
     await expect(page.getByTestId('ruler-panel')).toBeHidden();
     expect((await state(page)).ruler).toMatchObject({ active: false, points: [] });
+    await expect(page.getByTestId('ruler')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('точка ставиться там, де натиснули: тремтіння не зсуває ні точку, ні камеру', async ({ page }) => {
+    await startRuler(page);
+    const target = { x: -2, y: 1.2, z: 0.3 };
+    const view = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
+    const p = await project(page, target);
+    // Натиснули точно в ціль, рука здригнулась на 4 px, відпустили.
+    await page.mouse.move(p.x, p.y);
+    await page.mouse.down();
+    await page.mouse.move(p.x + 3, p.y + 2.5, { steps: 3 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    const s = await state(page);
+    expect(s.ruler.points).toHaveLength(1);
+    const hit = s.ruler.points[0];
+    const errorMm = Math.hypot(hit.x - target.x, hit.y - target.y, hit.z - target.z) * 1000;
+    expect(errorMm).toBeLessThan(20); // менше пікселя на такій відстані
+    // Камера там само, де була до натискання (інерції від тремтіння немає).
+    const after = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
+    expect(Math.hypot(after.position.x - view.position.x, after.position.y - view.position.y, after.position.z - view.position.z)).toBeLessThan(1e-6);
   });
 });
 

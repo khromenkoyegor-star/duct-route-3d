@@ -1,4 +1,4 @@
-import { formatBytes, formatCount, formatSizeMm, type ScanInfo } from '../core/scan-info';
+import { formatBytes, formatCount, type ScanInfo } from '../core/scan-info';
 import { formatMm } from '../core/units';
 import { createVersionBadge } from './version-badge';
 
@@ -30,6 +30,26 @@ export function createTitle(): TitlePanel {
   const scanName = document.createElement('p');
   scanName.className = 'scan-name';
   scanName.dataset.testid = 'scan-name';
+
+  // На iPhone подробиці (трикутники, попередження, версія) згортаються — більше місця скану.
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'details-toggle';
+  toggle.dataset.testid = 'scan-details-toggle';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-label', 'Докладніше про скан');
+  toggle.innerHTML =
+    '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+  toggle.addEventListener('click', () => {
+    const expanded = !panel.classList.contains('title-panel--expanded');
+    panel.classList.toggle('title-panel--expanded', expanded);
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.setAttribute('aria-label', expanded ? 'Згорнути' : 'Докладніше про скан');
+  });
+  const warningSummary = document.createElement('p');
+  warningSummary.className = 'scan-warning-summary';
+  warningSummary.dataset.testid = 'scan-warning-summary';
   const scanSize = document.createElement('p');
   scanSize.className = 'scan-row';
   scanSize.dataset.testid = 'scan-size';
@@ -39,9 +59,9 @@ export function createTitle(): TitlePanel {
   const warnings = document.createElement('ul');
   warnings.className = 'scan-warnings';
   warnings.dataset.testid = 'scan-warnings';
-  scan.append(scanName, scanSize, scanStats, warnings);
+  scan.append(scanName, scanSize, scanStats, warningSummary, warnings);
 
-  panel.append(name, subtitle, scan, createVersionBadge());
+  panel.append(toggle, name, subtitle, scan, createVersionBadge());
 
   return {
     element: panel,
@@ -52,8 +72,29 @@ export function createTitle(): TitlePanel {
       panel.classList.toggle('title-panel--scan', hasScan);
       if (!hasScan) return;
       scanName.textContent = fileName;
-      scanSize.textContent = `Габарит: ${formatSizeMm(info.sizeMm)}`;
-      scanStats.textContent = `${formatCount(info.triangles)} трикутників · ${formatBytes(info.fileBytes)}`;
+      // «Габарит: X 4 000 · Y 2 700 · Z 3 000 мм» — літери осей кольорові, Y — висота.
+      const n = (mm: number) => formatMm(mm).replace(/\s*мм$/, '');
+      const axis = (letter: string) => {
+        const span = document.createElement('span');
+        span.className = `axis-letter axis-letter--${letter.toLowerCase()}`;
+        span.textContent = letter;
+        return span;
+      };
+      scanSize.replaceChildren(
+        'Габарит: ',
+        axis('X'),
+        ` ${n(info.sizeMm.x)} · `,
+        axis('Y'),
+        ` ${n(info.sizeMm.y)} · `,
+        axis('Z'),
+        ` ${n(info.sizeMm.z)} мм`,
+      );
+      const count = info.warnings.length;
+      warningSummary.textContent = `⚠︎ ${count} ${plural(count, 'попередження', 'попередження', 'попереджень')}`;
+      warningSummary.hidden = count === 0;
+      scanStats.textContent =
+        `${formatCount(info.triangles)} ${plural(info.triangles, 'трикутник', 'трикутники', 'трикутників')}` +
+        ` · ${formatBytes(info.fileBytes)}`;
       warnings.replaceChildren(
         ...info.warnings.map((text) => {
           const item = document.createElement('li');
@@ -64,6 +105,15 @@ export function createTitle(): TitlePanel {
       warnings.hidden = info.warnings.length === 0;
     },
   };
+}
+
+/** Українська множина: 1 трикутник, 2 трикутники, 5 трикутників. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 /** Підказка про масштаб і осі — панель знизу зліва. */

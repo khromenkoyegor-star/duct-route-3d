@@ -558,3 +558,239 @@ body {
     font-size: 11px;
   }
 }
+
+/* ───────── Етап 1: правки за UX-рецензією ───────── */
+
+:root {
+  --tint-soft: rgba(0, 122, 255, 0.14);
+  --warning-label: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tint-soft: rgba(10, 132, 255, 0.24);
+    --warning-label: #ffd60a;
+  }
+}
+
+/* Габарит: кольорові літери осей (Y — висота). */
+.axis-letter {
+  font-weight: 700;
+}
+
+.axis-letter--x {
+  color: var(--axis-x);
+}
+
+.axis-letter--y {
+  color: var(--axis-y);
+}
+
+.axis-letter--z {
+  color: var(--axis-z);
+}
+
+.scan-warnings {
+  font-size: 15px;
+}
+
+.scan-warning-summary {
+  margin: 6px 0 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--warning-bg);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* На великому екрані підсумок попереджень не потрібен — видно всі. */
+.scan-warning-summary,
+.details-toggle {
+  display: none;
+}
+
+.details-toggle {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tint);
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.title-panel--expanded .details-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* Активна «Рулетка» — «тонована», як вибраний пункт в iOS; не плутається з «Відкрити скан». */
+.tool-button--active,
+.tool-button--active:not(:disabled) {
+  background: var(--tint-soft);
+  color: var(--tint);
+  border-color: var(--tint);
+}
+
+.is-ruler .viewport {
+  cursor: crosshair;
+}
+
+/* Рулетка: заголовок із кнопкою «Готово», результат і другий рядок-підказка. */
+.ruler-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ruler-panel {
+  text-align: left;
+}
+
+.ruler-done {
+  min-width: 44px;
+  min-height: 44px;
+  margin: -10px -8px -6px 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--tint);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ruler-sub {
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: var(--label-secondary);
+}
+
+.ruler-sub--warning {
+  color: var(--warning-label);
+  font-weight: 600;
+}
+
+.ruler-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ruler-line-halo {
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+.ruler-line {
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+/* Маркер — кільце з крапкою в центрі: місце виміру не закрите. */
+.ruler-marker {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 0 0 1.5px #ffffff,
+    0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.ruler-marker::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px #ffffff;
+}
+
+.card-detail {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--label-secondary);
+}
+
+/* Широкий екран: інформаційна панель не заходить під кнопки. */
+.title-panel {
+  max-width: min(380px, calc(100% - var(--safe-left) - var(--safe-right) - 3 * var(--gap) - 470px));
+}
+
+/* Середня ширина (Split View на iPad) і низький екран (iPhone горизонтально): кнопки — лише іконки. */
+@media (min-width: 700px) and (max-width: 899px), (max-height: 500px) {
+  .tool-label {
+    display: none;
+  }
+
+  .tool-button {
+    width: 44px;
+    padding: 0;
+  }
+
+  .title-panel {
+    max-width: min(380px, calc(100% - var(--safe-left) - var(--safe-right) - 3 * var(--gap) - 144px));
+  }
+
+  .ruler-panel {
+    max-width: min(320px, calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap)));
+  }
+}
+
+/* Вузький (iPhone вертикально): інфопанель на всю ширину. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .title-panel {
+    max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+  }
+
+  .ruler-done {
+    margin-top: -12px;
+  }
+}
+
+/* Компактні екрани (iPhone): подробиці про скан згорнуто, розгортаються кнопкою. */
+@media (max-width: 699px), (max-height: 500px) {
+  .title-panel--scan {
+    padding-right: 48px;
+  }
+
+  .title-panel--scan .details-toggle {
+    display: inline-flex;
+  }
+
+  .title-panel--scan:not(.title-panel--expanded) .scan-row--secondary,
+  .title-panel--scan:not(.title-panel--expanded) .scan-warnings,
+  .title-panel--scan:not(.title-panel--expanded) .version-badge {
+    display: none;
+  }
+
+  .title-panel--scan:not(.title-panel--expanded) .scan-warning-summary:not([hidden]) {
+    display: block;
+  }
+
+  .title-panel--expanded .scan-row--secondary,
+  .title-panel--expanded .scan-warnings li + li {
+    display: block;
+  }
+}

@@ -32,6 +32,18 @@ export function detectScanFileKind(name: string, head: Uint8Array): ScanFileKind
   return 'unknown';
 }
 
+const FOREIGN_3D = new Set(['usdz', 'usda', 'usdc', 'usd', 'obj', 'fbx', 'stl', 'ply', 'dae', 'las', 'laz', 'e57', 'xyz', 'pts', 'dxf', 'blend']);
+
+/**
+ * Інші 3D-формати (Polycam уміє й USDZ, OBJ, PLY…): конкретна підказка, що вибрати замість.
+ * null — якщо це не відомий 3D-формат.
+ */
+export function foreignFormatHint(name: string): string | null {
+  const ext = extension(name);
+  if (!FOREIGN_3D.has(ext)) return null;
+  return `Це файл ${ext.toUpperCase()}, а додаток відкриває GLTF. У Polycam виберіть експорт GLTF — вийде ZIP-архів, який відкривається тут.`;
+}
+
 /** Службові файли архівів macOS тощо — ніколи не модель. */
 export function isJunkPath(path: string): boolean {
   const parts = path.split('/');

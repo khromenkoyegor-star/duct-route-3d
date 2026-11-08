@@ -1,12 +1,13 @@
 /**
  * «Рулетка»: два короткі дотики по скану → відстань між точками в мм.
  * Перетягування, як завжди, обертає камеру й точку не ставить (див. tap.ts).
+ * Точка береться там, де натиснули, а камера повертається в положення на момент натискання —
+ * тремтіння пальця чи мишки не зсуває ні камеру, ні точку.
  * Наступний дотик після виміру починає новий вимір.
  */
 import type { Vector3 } from 'three';
 import { formatMm, mToMm } from '../core/units';
-import { createRulerLine } from '../scene/ruler-line';
-import type { Viewer } from '../scene/viewer';
+import type { Viewer, ViewSnapshot } from '../scene/viewer';
 import { onTap } from './tap';
 
 export interface RulerState {
@@ -20,7 +21,7 @@ export interface RulerState {
 export interface Ruler {
   /** Панель з підказкою й результатом. */
   panel: HTMLElement;
-  /** Шар з маркерами точок і підписом відстані. */
+  /** Шар з лінією, маркерами точок і підписом відстані. */
   overlay: HTMLElement;
   readonly state: RulerState;
   setActive(active: boolean): void;
@@ -31,26 +32,52 @@ export interface Ruler {
 
 const HINT_FIRST = 'Торкніться першої точки на скані';
 const HINT_SECOND = 'Тепер — другої точки';
+const HINT_NEXT = 'Торкніться скану, щоб почати новий вимір';
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
 
-export function createRuler(viewer: Viewer, onChange?: (state: RulerState) => void): Ruler {
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+export function createRuler(
+  viewer: Viewer,
+  handlers: { onChange?(state: RulerState): void; onDone?(): void } = {},
+): Ruler {
   const panel = document.createElement('div');
   panel.className = 'panel ruler-panel';
   panel.dataset.testid = 'ruler-panel';
-  panel.setAttribute('role', 'status');
-  panel.setAttribute('aria-live', 'polite');
   panel.hidden = true;
+  const head = document.createElement('div');
+  head.className = 'ruler-head';
   const title = document.createElement('p');
   title.className = 'ruler-title';
   title.textContent = 'Рулетка';
+  const done = document.createElement('button');
+  done.type = 'button';
+  done.className = 'ruler-done';
+  done.dataset.testid = 'ruler-done';
+  done.textContent = 'Готово';
+  done.addEventListener('click', () => handlers.onDone?.());
+  head.append(title, done);
   const text = document.createElement('p');
   text.className = 'ruler-text';
   text.dataset.testid = 'ruler-text';
-  panel.append(title, text);
+  text.setAttribute('role', 'status');
+  text.setAttribute('aria-live', 'polite');
+  const sub = document.createElement('p');
+  sub.className = 'ruler-sub';
+  sub.dataset.testid = 'ruler-sub';
+  panel.append(head, text, sub);
 
   const overlay = document.createElement('div');
   overlay.className = 'ruler-overlay';
   overlay.setAttribute('aria-hidden', 'true');
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ruler-svg');
+  const halo = document.createElementNS(SVG_NS, 'line');
+  halo.setAttribute('class', 'ruler-line-halo');
+  const line = document.createElementNS(SVG_NS, 'line');
+  line.setAttribute('class', 'ruler-line');
+  svg.append(halo, line);
+  overlay.append(svg);
   const markers = [0, 1].map(() => {
     const marker = document.createElement('div');
     marker.className = 'ruler-marker';
@@ -63,11 +90,9 @@ export function createRuler(viewer: Viewer, onChange?: (state: RulerState) => vo
   label.hidden = true;
   overlay.append(label);
 
-  const line = createRulerLine();
-  viewer.add(line.object);
-
   let active = false;
   let points: Vector3[] = [];
+  let downView: ViewSnapshot | null = null;
 
   const state = (): RulerState => {
     const [a, b] = points;
@@ -82,54 +107,73 @@ export function createRuler(viewer: Viewer, onChange?: (state: RulerState) => vo
   const place = (element: HTMLElement, world: Vector3 | undefined, shift = 'translate(-50%, -50%)') => {
     if (!world) {
       element.hidden = true;
-      return;
+      return null;
     }
     const screen = viewer.projectPoint(world);
     element.hidden = !screen.visible;
     element.style.transform = `translate(${screen.x}px, ${screen.y}px) ${shift}`;
+    return screen;
   };
 
   const updateOverlay = () => {
-    const show = active;
-    place(markers[0]!, show ? points[0] : undefined);
-    place(markers[1]!, show ? points[1] : undefined);
+    overlay.hidden = !active;
+    if (!active) return;
     const [a, b] = points;
-    if (show && a && b) {
-      place(label, a.clone().add(b).multiplyScalar(0.5), 'translate(-50%, -140%)');
-    } else {
-      label.hidden = true;
+    const sa = place(markers[0]!, a);
+    const sb = place(markers[1]!, b);
+    const lineVisible = !!(sa?.visible && sb?.visible);
+    svg.style.display = lineVisible ? '' : 'none';
+    if (sa && sb && lineVisible) {
+      for (const el of [halo, line]) {
+        el.setAttribute('x1', String(sa.x));
+        el.setAttribute('y1', String(sa.y));
+        el.setAttribute('x2', String(sb.x));
+        el.setAttribute('y2', String(sb.y));
+      }
     }
+    if (a && b) place(label, a.clone().add(b).multiplyScalar(0.5), 'translate(-50%, -150%)');
+    else label.hidden = true;
   };
   const stopFrames = viewer.onFrame(updateOverlay);
 
-  const render = (hint?: string) => {
+  const render = (missed = false) => {
     const current = state();
     panel.hidden = !active;
+    text.classList.toggle('ruler-text--result', current.distanceMm !== null);
     if (current.distanceMm !== null) {
       const value = formatMm(current.distanceMm);
-      text.textContent = hint ?? value;
-      text.classList.toggle('ruler-text--result', !hint);
+      text.textContent = value;
       label.textContent = value;
     } else {
-      text.textContent = hint ?? (points.length === 0 ? HINT_FIRST : HINT_SECOND);
-      text.classList.remove('ruler-text--result');
+      text.textContent = points.length === 0 ? HINT_FIRST : HINT_SECOND;
     }
-    line.set(active ? (points[0] ?? null) : null, active ? (points[1] ?? null) : null);
+    sub.textContent = missed ? HINT_MISS : current.distanceMm !== null ? HINT_NEXT : '';
+    sub.hidden = sub.textContent === '';
+    sub.classList.toggle('ruler-sub--warning', missed);
     viewer.requestRender();
     updateOverlay();
-    onChange?.(current);
+    handlers.onChange?.(current);
   };
 
-  const stopTap = onTap(viewer.canvas, (x, y) => {
-    if (!active) return;
-    const hit = viewer.raycastScan(x, y);
-    if (!hit) {
-      render(HINT_MISS);
-      return;
-    }
-    points = points.length >= 2 ? [hit] : [...points, hit];
-    render();
+  const stopTap = onTap(viewer.canvas, {
+    onDown: () => {
+      downView = active ? viewer.snapshotView() : null;
+    },
+    onTap: (x, y) => {
+      if (!active) return;
+      // Скасувати мікроповорот камери від тремтіння — шукаємо точку в тому кадрі, куди цілились.
+      if (downView) viewer.restoreView(downView);
+      const hit = viewer.raycastScan(x, y);
+      if (!hit) {
+        render(true);
+        return;
+      }
+      points = points.length >= 2 ? [hit] : [...points, hit];
+      render();
+    },
   });
+
+  render();
 
   return {
     panel,
@@ -149,8 +193,6 @@ export function createRuler(viewer: Viewer, onChange?: (state: RulerState) => vo
     dispose() {
       stopTap();
       stopFrames();
-      viewer.remove(line.object);
-      line.dispose();
       panel.remove();
       overlay.remove();
     },

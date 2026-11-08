@@ -20,6 +20,7 @@ import {
   detectScanFileKind,
   dirname,
   externalReferences,
+  foreignFormatHint,
   mimeType,
   pickMainModel,
   resolveUri,
@@ -99,7 +100,14 @@ async function collectSources(
       if (!entry.isDirectory) sources.set(entry.name, { read: () => extractZipEntry(bytes, entry) });
     }
     const main = pickMainModel([...sources.keys()]);
-    if (!main) throw new ScanLoadError('В архіві немає 3D-моделі (.gltf або .glb). Експортуйте скан з Polycam у форматі GLTF.');
+    if (!main) {
+      // USDZ — теж ZIP усередині: підказка за назвою самого файлу, потім — за вмістом архіву.
+      const hint =
+        foreignFormatHint(zips[0]!.file.name) ?? [...sources.keys()].map(foreignFormatHint).find((h) => h !== null);
+      throw new ScanLoadError(
+        hint ?? 'В архіві немає 3D-моделі (.gltf або .glb). Експортуйте скан з Polycam у форматі GLTF.',
+      );
+    }
     return { sources, main, flat: false };
   }
 
@@ -113,7 +121,10 @@ async function collectSources(
     const kind = detectScanFileKind(only.file.name, only.bytes);
     if (kind === 'glb' || kind === 'gltf') main = basename(only.file.name);
   }
-  if (!main) throw new ScanLoadError(NOT_A_SCAN);
+  if (!main) {
+    const hint = contents.map((c) => foreignFormatHint(c.file.name)).find((h) => h !== null);
+    throw new ScanLoadError(hint ?? NOT_A_SCAN);
+  }
   return { sources, main, flat: true };
 }
 
@@ -305,48 +316,90 @@ function collectStats(root: Object3D, fileBytes: number, texturesReduced: number
   };
 }
 
-/** Відкрити скан із вибраних файлів. */
-export async function loadScan(files: readonly ScanFile[], options: LoadOptions): Promise<LoadedScan> {
-  const onPhase = options.onPhase ?? (() => {});
+/** Перевірений, але ще не побудований скан: файли прочитано, модель знайдено, усі її файли на місці. */
+export interface PreparedScan {
+  name: string;
+  fileBytes: number;
+  kind: 'glb' | 'gltf';
+  main: string;
+  mainBytes: Uint8Array;
+  /** Для .gltf — розібраний JSON і шляхи його зовнішніх файлів. */
+  json: GltfJson | null;
+  refs: Array<{ kind: 'buffer' | 'image'; index: number; path: string; source: Source }>;
+}
+
+type GltfJson = Record<string, unknown> & { buffers?: Array<{ uri?: string }>; images?: Array<{ uri?: string }> };
+
+/**
+ * Крок 1 — швидка перевірка без побудови 3D: чи це скан, чи цілий архів, чи всі файли на місці.
+ * Якщо тут помилка — уже відкритий скан можна не закривати.
+ */
+export async function prepareScan(files: readonly ScanFile[], onPhase: (phase: LoadPhase) => void = () => {}): Promise<PreparedScan> {
   if (files.length === 0) throw new ScanLoadError('Файл не вибрано.');
   const fileBytes = files.reduce((sum, f) => sum + f.size, 0);
-  const displayName = files.length === 1 ? files[0]!.name : `${files.length} файли`;
+  const name = files.length === 1 ? files[0]!.name : `${files.length} файли`;
 
   const { sources, main, flat } = await collectSources(files, onPhase);
-  const mainBytes = await sources.get(main)!.read();
+  let mainBytes: Uint8Array;
+  try {
+    mainBytes = await sources.get(main)!.read();
+  } catch (error) {
+    throw new ScanLoadError(error instanceof ZipError ? error.message : 'Архів пошкоджений.');
+  }
   const kind = detectScanFileKind(main, mainBytes);
 
+  if (kind === 'glb') return { name, fileBytes, kind, main, mainBytes, json: null, refs: [] };
+  if (kind !== 'gltf') throw new ScanLoadError(NOT_A_SCAN);
+
+  let json: GltfJson;
+  try {
+    json = JSON.parse(new TextDecoder().decode(mainBytes));
+  } catch {
+    throw new ScanLoadError(`Файл моделі «${basename(main)}» пошкоджений.`);
+  }
+  if (typeof json !== 'object' || json === null || typeof json.asset !== 'object') {
+    throw new ScanLoadError(`Файл «${basename(main)}» — не 3D-модель glTF.`);
+  }
+  const unsupported = unsupportedRequiredExtensions(json);
+  if (unsupported.length > 0) {
+    throw new ScanLoadError(
+      `Скан збережено з розширенням, яке поки не підтримується (${unsupported.join(', ')}). ` +
+        'Експортуйте з Polycam без стиснення.',
+    );
+  }
+  const refs: PreparedScan['refs'] = [];
+  const missing: string[] = [];
+  const baseDir = dirname(main);
+  for (const ref of externalReferences(json)) {
+    const path = resolveUri(baseDir, ref.uri);
+    const source = sources.get(path) ?? (flat ? sources.get(basename(path)) : undefined);
+    if (source) refs.push({ kind: ref.kind, index: ref.index, path, source });
+    else missing.push(basename(path));
+  }
+  if (missing.length > 0) {
+    throw new ScanLoadError(
+      `Бракує файлів моделі: ${missing.join(', ')}. Відкрийте ZIP-архів з Polycam цілком ` +
+        'або виберіть разом із .gltf усі його файли.',
+    );
+  }
+  return { name, fileBytes, kind, main, mainBytes, json, refs };
+}
+
+/** Крок 2 — побудувати 3D: розпакувати файли моделі, завантажити, підготувати до показу. */
+export async function buildScan(prepared: PreparedScan, options: LoadOptions): Promise<LoadedScan> {
+  const onPhase = options.onPhase ?? (() => {});
   const urls: string[] = [];
   let data: ArrayBuffer | string;
-  if (kind === 'glb') {
-    data = toArrayBuffer(mainBytes);
-  } else if (kind === 'gltf') {
-    let json: Record<string, unknown> & { buffers?: Array<{ uri?: string }>; images?: Array<{ uri?: string }> };
-    try {
-      json = JSON.parse(new TextDecoder().decode(mainBytes));
-    } catch {
-      throw new ScanLoadError(`Файл моделі «${basename(main)}» пошкоджений.`);
-    }
-    const unsupported = unsupportedRequiredExtensions(json);
-    if (unsupported.length > 0) {
-      throw new ScanLoadError(
-        `Скан збережено з розширенням, яке поки не підтримується (${unsupported.join(', ')}). ` +
-          'Експортуйте з Polycam без стиснення.',
-      );
-    }
+  if (prepared.kind === 'glb') {
+    data = toArrayBuffer(prepared.mainBytes);
+  } else {
     // Зовнішні файли (геометрія, текстури) → тимчасові локальні адреси blob:, прямо в JSON.
-    const missing: string[] = [];
-    const baseDir = dirname(main);
+    onPhase('unzipping');
+    const json = prepared.json!;
     try {
-      for (const ref of externalReferences(json)) {
-        const path = resolveUri(baseDir, ref.uri);
-        const source = sources.get(path) ?? (flat ? sources.get(basename(path)) : undefined);
-        if (!source) {
-          missing.push(basename(path));
-          continue;
-        }
-        const bytes = await source.read();
-        const url = URL.createObjectURL(new Blob([toArrayBuffer(bytes)], { type: mimeType(path) }));
+      for (const ref of prepared.refs) {
+        const bytes = await ref.source.read();
+        const url = URL.createObjectURL(new Blob([toArrayBuffer(bytes)], { type: mimeType(ref.path) }));
         urls.push(url);
         const list = ref.kind === 'buffer' ? json.buffers : json.images;
         list![ref.index]!.uri = url;
@@ -356,16 +409,7 @@ export async function loadScan(files: readonly ScanFile[], options: LoadOptions)
       if (error instanceof ZipError) throw new ScanLoadError(error.message);
       throw error;
     }
-    if (missing.length > 0) {
-      for (const url of urls) URL.revokeObjectURL(url);
-      throw new ScanLoadError(
-        `Бракує файлів моделі: ${missing.join(', ')}. Відкрийте ZIP-архів з Polycam цілком ` +
-          'або виберіть разом із .gltf усі його файли.',
-      );
-    }
     data = JSON.stringify(json);
-  } else {
-    throw new ScanLoadError(NOT_A_SCAN);
   }
 
   onPhase('parsing');
@@ -384,11 +428,16 @@ export async function loadScan(files: readonly ScanFile[], options: LoadOptions)
   try {
     makeUnlit(root);
     const texturesReduced = await limitTextures(root, options.maxTextureSide);
-    const stats = collectStats(root, fileBytes, texturesReduced);
+    const stats = collectStats(root, prepared.fileBytes, texturesReduced);
     root.name = 'scan';
-    return { name: displayName, root, stats, dispose: () => disposeObject(root) };
+    return { name: prepared.name, root, stats, dispose: () => disposeObject(root) };
   } catch (error) {
     disposeObject(root);
     throw error;
   }
+}
+
+/** Відкрити скан із вибраних файлів (перевірка + побудова). */
+export async function loadScan(files: readonly ScanFile[], options: LoadOptions): Promise<LoadedScan> {
+  return buildScan(await prepareScan(files, options.onPhase), options);
 }

@@ -42,6 +42,11 @@ export interface Vec3Like {
   z: number;
 }
 
+export interface ViewSnapshot {
+  position: Vector3;
+  target: Vector3;
+}
+
 export interface Viewer {
   readonly canvas: HTMLCanvasElement;
   /** Перемалювати кадр (сцена малюється лише тоді, коли щось змінилось). */
@@ -62,6 +67,10 @@ export interface Viewer {
   raycastScan(clientX: number, clientY: number): Vector3 | null;
   /** Поставити камеру: звідки й куди дивитися (м). */
   setView(position: Vec3Like, target: Vec3Like): void;
+  /** Запам'ятати положення камери (наприклад, у момент натискання). */
+  snapshotView(): ViewSnapshot;
+  /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
+  restoreView(snapshot: ViewSnapshot): void;
   /** Додати/прибрати допоміжний об'єкт (лінія рулетки тощо). */
   add(object: Object3D): void;
   remove(object: Object3D): void;
@@ -284,6 +293,21 @@ export function createViewer(container: HTMLElement): Viewer {
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObject(scanGroup, true)[0];
       return hit ? hit.point.clone() : null;
+    },
+    snapshotView() {
+      return { position: camera.position.clone(), target: controls.target.clone() };
+    },
+    restoreView(snapshot) {
+      // Спершу «доїсти» залишок інерції без анімації, потім повернути камеру.
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = damping;
+      controls.target.copy(snapshot.target);
+      camera.position.copy(snapshot.position);
+      camera.lookAt(controls.target);
+      controls.update();
+      requestRender();
     },
     setView(position, target) {
       controls.target.set(target.x, target.y, target.z);
