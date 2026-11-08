@@ -39,6 +39,8 @@ export interface Ruler {
   /** Стрілки осей біля точки, яку доводять. */
   editorOverlay: HTMLElement;
   readonly state: RulerState;
+  /** Центр вільної від панелей частини екрана (куди ставити точку, що доводиться) або null. */
+  freeAreaCenter(): { x: number; y: number } | null;
   /** Щойно підтвердили точку (захист від подвійного натискання). */
   recentlyConfirmed(): boolean;
   setActive(active: boolean): void;
@@ -241,22 +243,21 @@ export function createRuler(
    * Точку має бути видно: якщо її закрила панель (джойстик, рулетка, кнопки) або вона за краєм екрана,
    * камера зсувається так, щоб точка опинилась посередині вільної від панелей частини екрана.
    */
-  const keepVisible = (world: Vector3) => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const obstacles = [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor')]
+  /** Панелі й кнопки, що закривають сцену (видимі). */
+  const obstacleRects = () =>
+    [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor, .view-bar')]
       .filter((el) => !el.hidden && getComputedStyle(el).display !== 'none')
       .map((el) => el.getBoundingClientRect())
       .filter((r) => r.width > 0 && r.height > 0);
-    const margin = 28;
-    const screen = viewer.projectPoint(world);
-    const covered = obstacles.some(
-      (r) => screen.x > r.left - margin && screen.x < r.right + margin && screen.y > r.top - margin && screen.y < r.bottom + margin,
-    );
-    const outside = !screen.visible || screen.x < margin || screen.y < margin || screen.x > vw - margin || screen.y > vh - margin;
-    if (!covered && !outside) return;
 
-    // Вільні прямокутники: смуга між верхніми й нижніми панелями або місце праворуч від редактора.
+  /**
+   * Центр вільної від панелей частини екрана: смуга між верхніми й нижніми панелями
+   * або місце праворуч від редактора точки (iPhone горизонтально). null — вільного місця замало.
+   */
+  const freeAreaCenter = (): { x: number; y: number } | null => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const obstacles = obstacleRects();
     const free = (left: number, right: number) => {
       const overlapping = obstacles.filter((r) => r.right > left && r.left < right);
       const top = Math.max(0, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
@@ -269,11 +270,26 @@ export function createRuler(
     const score = (c: { left: number; right: number; top: number; bottom: number }) =>
       Math.min(c.right - c.left, c.bottom - c.top);
     const best = candidates.reduce((a, b) => (score(b) > score(a) ? b : a));
-    if (score(best) < 60) {
-      viewer.centerOn(world);
-      return;
-    }
-    viewer.centerOn(world, { x: (best.left + best.right) / 2, y: (best.top + best.bottom) / 2 });
+    if (score(best) < 60) return null;
+    return { x: (best.left + best.right) / 2, y: (best.top + best.bottom) / 2 };
+  };
+
+  /**
+   * Точку має бути видно: якщо її закрила панель (джойстик, рулетка, кнопки) або вона за краєм екрана,
+   * камера повертається на місці так, щоб точка опинилась посередині вільної від панелей частини.
+   */
+  const keepVisible = (world: Vector3) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 28;
+    const screen = viewer.projectPoint(world);
+    const covered = obstacleRects().some(
+      (r) => screen.x > r.left - margin && screen.x < r.right + margin && screen.y > r.top - margin && screen.y < r.bottom + margin,
+    );
+    const outside = !screen.visible || screen.x < margin || screen.y < margin || screen.x > vw - margin || screen.y > vh - margin;
+    if (!covered && !outside) return;
+    const at = freeAreaCenter();
+    viewer.centerOn(world, at ?? undefined);
   };
 
   const startEditing = (index: 0 | 1, hit: Vector3) => {
@@ -344,6 +360,7 @@ export function createRuler(
       return state();
     },
     recentlyConfirmed,
+    freeAreaCenter,
     setActive(value) {
       active = value;
       if (!active) reset();

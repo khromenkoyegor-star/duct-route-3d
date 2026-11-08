@@ -20,7 +20,7 @@ export interface Stick {
   /** Чи тримають зараз джойстик. */
   readonly active: boolean;
   /** Стрілки осей на колі джойстика (лише для 2D) і вісь, по якій зараз рух. */
-  setAxes(dirs: Record<HorizontalAxis, Vec2> | null, active: HorizontalAxis | null): void;
+  setAxes(dirs: Record<HorizontalAxis, Vec2> | null, active: HorizontalAxis | null, depth?: HorizontalAxis | null): void;
   /** Вісь, яку показує «кулька» під час руху (колір і літера). */
   setKnobAxis(axis: 'X' | 'Y' | 'Z' | null): void;
   dispose(): void;
@@ -175,7 +175,7 @@ export function createStick(options: StickOptions): Stick {
     get active() {
       return pointerId !== null;
     },
-    setAxes(dirs, activeAxis) {
+    setAxes(dirs, activeAxis, depth = null) {
       if (!guides) return;
       guides.style.display = dirs ? '' : 'none';
       if (!dirs) return;
@@ -191,6 +191,10 @@ export function createStick(options: StickOptions): Stick {
         part.line.classList.toggle('stick-guide--active', activeAxis === axis);
         part.line.classList.toggle('stick-guide--dim', activeAxis !== null && activeAxis !== axis);
         part.text.classList.toggle('stick-guide--dim', activeAxis !== null && activeAxis !== axis);
+        // Вісь, що дивиться в камеру: рух по ній — углиб екрана, тому вона приглушена й підписана «⊙».
+        part.line.classList.toggle('stick-guide--depth', depth === axis);
+        part.text.classList.toggle('stick-guide--depth', depth === axis);
+        part.text.textContent = depth === axis ? `${axis}⊙` : axis;
       }
     },
     setKnobAxis(axis) {

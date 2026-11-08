@@ -1,5 +1,7 @@
 /**
- * Збирає інтерфейс етапу 1: відкриття скану, «Показати все», інформація про скан, рулетка.
+ * Збирає інтерфейс: відкриття скану, «Показати все», «Рулетка», кнопки видів X/Y/Z.
+ * Інформація про скан (габарит, зсув, попередження) — у стані для тестів; на екрані постійно
+ * не показується (на прохання Єгора), лише віконце, якщо скан завеликий для пристрою.
  */
 import { type DeviceClass, describeScan, formatBytes, MAX_TEXTURE_SIDE, type ScanInfo } from '../core/scan-info';
 import {
@@ -11,11 +13,11 @@ import {
   ScanLoadError,
   type ScanFile,
 } from '../scene/scan-loader';
-import { GRID_CELL_MM, type Viewer } from '../scene/viewer';
+import type { Viewer } from '../scene/viewer';
 import { createAlert, createProgress } from './dialogs';
-import { createLegend, createTitle } from './hud';
 import { createRuler, type RulerState } from './ruler';
 import { createToolbar } from './toolbar';
+import { createViewBar } from './view-bar';
 
 export interface AppState {
   /** idle — нічого не відкрито; loading — відкривається; ready — скан показано. */
@@ -72,8 +74,18 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   input.hidden = true;
   input.dataset.testid = 'file-input';
 
-  const title = createTitle();
-  const legend = createLegend(GRID_CELL_MM);
+  // Кнопки видів X/Y/Z. Якщо зараз доводять точку — дивимось саме на неї.
+  const viewBar = createViewBar((axis) => {
+    const editing = ruler.state.editor;
+    // Доводять точку — дивимось на неї, і вона стає посередині вільної від панелей частини екрана.
+    const side =
+      editing.active && editing.point
+        ? viewer.viewAlong(axis, editing.point, ruler.freeAreaCenter() ?? undefined)
+        : viewer.viewAlong(axis);
+    viewBar.setActive(axis, side);
+  });
+  // Камеру повернули рукою — вид уже не «строго вздовж осі».
+  viewer.onUserCamera(() => viewBar.setActive(null));
   const progress = createProgress();
   const alert = createAlert();
 
@@ -105,10 +117,9 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   root.append(
     ruler.overlay,
     ruler.editorOverlay,
-    title.element,
+    viewBar.element,
     toolbar.element,
     ruler.panel,
-    legend,
     ruler.editor,
     progress.element,
     alert.element,
@@ -147,7 +158,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       }
       state.scanName = null;
       state.scanInfo = null;
-      title.showScan(null, null);
       toolbar.setScanLoaded(false);
 
       // 3. Будуємо 3D. Скан стає «відкритим» лише коли все вдалося — інакше звільняємо його.
@@ -166,7 +176,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       state.scanName = loaded.name;
       state.scanInfo = info;
       state.status = 'ready';
-      title.showScan(loaded.name, info);
+      // Скан завеликий для пристрою — одне віконце одразу після відкриття.
+      if (info.risks.length > 0) alert.show('Увага', info.risks.join('\n'));
       toolbar.setScanLoaded(true);
     } catch (error) {
       console.error(error);

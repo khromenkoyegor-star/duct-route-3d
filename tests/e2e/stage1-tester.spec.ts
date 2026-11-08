@@ -314,8 +314,8 @@ test.describe('Етап 1 (tester): важкий скан ≈ 38 МБ, 1 млн 
     expect(Math.abs(s.scanInfo.sizeMm.x - 4000)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo.sizeMm.z - 3000)).toBeLessThan(0.1);
-    await expect(page.getByTestId('scan-stats')).toContainText(/1\s001\s160 трикутників/);
-    await expect(page.getByTestId('scan-stats')).toContainText(/МБ/);
+    // Віконце-попередження: лише якщо скан справді завеликий для пристрою.
+    if (s.scanInfo.risks.length === 0) await expect(page.getByTestId('alert')).toBeHidden();
     if (maxSide === 4096) {
       expect(s.scanInfo.warnings.join(' ')).toMatch(/Текстури зменшено/);
     }
@@ -404,16 +404,14 @@ test.describe('Етап 1 (tester): важкий скан ≈ 38 МБ, 1 млн 
 // ───────────────────────────── інформація про скан ─────────────────────────────
 
 test.describe('Етап 1 (tester): інформація про скан', () => {
-  test('GLB тестової кімнати: на екрані габарит X 4 000 · Y 2 700 · Z 3 000 мм (саме в такому порядку)', async ({ page }) => {
+  test('GLB тестової кімнати: габарит X 4 000 · Y 2 700 · Z 3 000 мм (у стані додатка)', async ({ page }) => {
     await openApp(page);
     await chooseFiles(page, ROOM_GLB);
-    const size = page.getByTestId('scan-size');
-    await expect(size).toBeVisible();
-    const text = (await size.textContent()) ?? '';
-    expect(text.replace(/\s+/g, ' ')).toMatch(/4 000\D+2 700\D+3 000\s*мм/);
+    const s = await state(page);
     // Порядок осей: X — ширина 4000, Y — висота 2700, Z — глибина 3000.
-    expect(text.indexOf('X')).toBeLessThan(text.indexOf('Y'));
-    expect(text.indexOf('Y')).toBeLessThan(text.indexOf('Z'));
+    expect(Math.abs(s.scanInfo.sizeMm.x - 4000)).toBeLessThan(0.1);
+    expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
+    expect(Math.abs(s.scanInfo.sizeMm.z - 3000)).toBeLessThan(0.1);
   });
 
   test('скан повернутий у файлі на 90° навколо Y: габарит X ↔ Z міняються (скан не «вирівнюється»)', async ({ page }) => {

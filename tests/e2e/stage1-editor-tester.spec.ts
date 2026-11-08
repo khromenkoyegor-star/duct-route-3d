@@ -996,7 +996,6 @@ test.describe('Низ скану на Y = 0 (tester)', () => {
     expect(s.status).toBe('ready');
     expect(Math.abs(s.scanInfo!.offsetYMm - -500)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo!.sizeMm.y - 2700)).toBeLessThan(0.1);
-    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · скан опущено на 500 мм$/);
     const minY = await page.evaluate(() => window.__trasa!.viewer.scanBox()!.min.y);
     expect(Math.abs(minY)).toBeLessThan(1e-4);
     await page.getByTestId('ruler').click();
@@ -1014,7 +1013,6 @@ test.describe('Низ скану на Y = 0 (tester)', () => {
     await openScan(page, { name: 'garbage.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from(glb) });
     const s = await state(page);
     expect(Math.abs(s.scanInfo!.offsetYMm - 1750)).toBeLessThan(0.1);
-    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · скан піднято на 1\s750 мм$/);
     await page.getByTestId('ruler').click();
     const p = await tapFloor(page, 0.35);
     expect(Math.abs(p.y * 1000 - 350)).toBeLessThanOrEqual(0.1);

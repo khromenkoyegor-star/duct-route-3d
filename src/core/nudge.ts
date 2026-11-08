@@ -63,6 +63,8 @@ export interface AxisLayout {
   strong: HorizontalAxis;
   /** Чи коротшу вісь розведено перпендикулярно. */
   separated: boolean;
+  /** Вісь, що «дивиться в камеру» (рух по ній — углиб екрана), або null. */
+  depth?: HorizontalAxis | null;
 }
 
 /** Запас, щоб розкладка не «стрибала» від дрібних змін перспективи під час утримання. */
@@ -105,7 +107,7 @@ export function joystickLayout(
   } else {
     separated = degenerate || separation < MIN_AXIS_SEPARATION;
   }
-  const layout: AxisLayout = { strong, separated };
+  const layout: AxisLayout = { strong, separated, depth: degenerate ? weak : null };
   if (!separated) return { dirs: strong === 'X' ? { X: s, Z: w } : { X: w, Z: s }, layout };
   let perp: Vec2 = { x: -s.y, y: s.x };
   const dot = perp.x * w.x + perp.y * w.y;

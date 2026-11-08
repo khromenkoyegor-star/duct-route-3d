@@ -74,6 +74,18 @@ export interface Viewer {
   /** Поставити камеру: звідки й куди дивитися (м). */
   setView(position: Vec3Like, target: Vec3Like): void;
   /**
+   * Вид уздовж осі: камера дивиться строго вздовж X (збоку), Y (згори) чи Z (спереду) —
+   * перпендикулярно площині двох інших осей. Відстань до точки, на яку дивимось, та сама.
+   * `around` — на що дивитись (наприклад, точка, яку доводять); інакше — поточний центр огляду.
+   * `at` — де на екрані має опинитись `around` (CSS px), наприклад у вільній від панелей частині:
+   * камера зсувається паралельно екрану, тож вид лишається строго вздовж осі.
+   * Повторне натискання того самого виду — вид з протилежного боку.
+   * Повертає, з якого боку тепер дивимось: +1 або −1.
+   */
+  viewAlong(axis: 'X' | 'Y' | 'Z', around?: Vec3Like, at?: ScreenPoint): 1 | -1;
+  /** Викликається, коли людина сама почала рухати камеру (жест, колесо). Повертає відписку. */
+  onUserCamera(callback: () => void): () => void;
+  /**
    * Повернути камеру на місці так, щоб точка опинилась у центрі кадру або в заданому місці
    * екрана `at` (CSS px) — наприклад, у вільній від панелей частині. Камера не рухається.
    */
@@ -183,6 +195,7 @@ export function createViewer(container: HTMLElement): Viewer {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    axes.setScreen(height, camera.fov);
     if (firstLayout) {
       resetView();
     } else {
@@ -390,6 +403,51 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.target.copy(camera.position).addScaledVector(forward, distance);
       controls.update();
       requestRender();
+    },
+    viewAlong(axis, around, at) {
+      flushInertia();
+      const target = around ? new Vector3(around.x, around.y, around.z) : controls.target.clone();
+      const offset = camera.position.clone().sub(controls.target);
+      const distance = Math.max(offset.length(), controls.minDistance * 2, 0.5);
+      const index = axis === 'X' ? 0 : axis === 'Y' ? 1 : 2;
+      const along = offset.getComponent(index) / offset.length();
+      // Уже дивимось уздовж цієї осі — показуємо протилежний бік; інакше — найближчий бік.
+      // Для Y (згори) типовий бік — згори (+Y).
+      const aligned = Math.abs(along) > 0.999;
+      let side: 1 | -1 = along >= 0 ? 1 : -1;
+      if (axis === 'Y' && !aligned) side = 1;
+      if (aligned) side = side === 1 ? -1 : 1;
+      const direction = new Vector3();
+      direction.setComponent(index, side);
+      if (axis === 'Y') {
+        // Строго згори камера «не знає», де верх екрана, — трохи зсуваємо, щоб на екрані
+        // −Z було вгорі, а +X — праворуч (як план на папері).
+        direction.z += side * 1e-4;
+        direction.normalize();
+      }
+      controls.target.copy(target);
+      camera.position.copy(target).addScaledVector(direction, distance);
+      camera.lookAt(target);
+      if (at) {
+        // Паралельний зсув камери й цілі: напрямок погляду не змінюється.
+        const rect = canvas.getBoundingClientRect();
+        const metresPerPx = (2 * distance * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, rect.height);
+        const dx = (at.x - (rect.left + rect.width / 2)) * metresPerPx;
+        const dy = (at.y - (rect.top + rect.height / 2)) * metresPerPx;
+        camera.updateMatrixWorld();
+        const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const up = new Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        const shift = right.multiplyScalar(-dx).add(up.multiplyScalar(dy));
+        camera.position.add(shift);
+        controls.target.add(shift);
+      }
+      controls.update();
+      requestRender();
+      return side;
+    },
+    onUserCamera(callback) {
+      controls.addEventListener('start', callback);
+      return () => controls.removeEventListener('start', callback);
     },
     setView(position, target) {
       controls.target.set(target.x, target.y, target.z);

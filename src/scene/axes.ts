@@ -13,13 +13,18 @@ import {
 import { mmToM } from '../core/units';
 import type { SceneTheme } from './theme';
 
-/** Довжина стрілки осі — одна клітинка сітки. */
-const AXIS_LENGTH_MM = 1000;
-const SHAFT_RADIUS_MM = 18;
-const HEAD_RADIUS_MM = 55;
-const HEAD_LENGTH_MM = 160;
-const LABEL_SIZE_MM = 340;
-const LABEL_GAP_MM = 220;
+/** Довжина стрілки осі — невелика, щоб не закривати скан (на прохання Єгора). */
+export const AXIS_LENGTH_MM = 300;
+const SHAFT_RADIUS_MM = 6;
+const HEAD_RADIUS_MM = 18;
+const HEAD_LENGTH_MM = 60;
+const LABEL_GAP_MM = 90;
+/** Підписи X/Y/Z — сталого розміру на екрані, незалежно від відстані й висоти екрана. */
+const LABEL_PX = 18;
+/** Початковий масштаб підпису (до першого setScreen). */
+const LABEL_SCREEN_SCALE = 0.02;
+/** Напівпрозорі — видно, але не заважають. */
+export const AXES_OPACITY = 0.6;
 
 export type AxisName = 'X' | 'Y' | 'Z';
 
@@ -37,6 +42,8 @@ export interface Axes {
   /** Точка, де стоїть підпис осі (у метрах сцени) — для тестів і майбутніх підказок. */
   labelPosition(name: AxisName): Vector3;
   setTheme(theme: SceneTheme): void;
+  /** Висота кадру (px) і кут огляду камери (°) — щоб підписи були ≈ 18 px на будь-якому екрані. */
+  setScreen(heightPx: number, fovDeg: number): void;
   dispose(): void;
 }
 
@@ -93,7 +100,12 @@ export function createAxes(theme: SceneTheme): Axes {
 
   const parts: AxisParts[] = (['X', 'Y', 'Z'] as const).map((name) => {
     const direction = directions[name];
-    const material = new MeshBasicMaterial({ color: axisColor(theme, name) });
+    const material = new MeshBasicMaterial({
+      color: axisColor(theme, name),
+      transparent: true,
+      opacity: AXES_OPACITY,
+      depthWrite: false,
+    });
 
     const arrow = new Group();
     arrow.name = `axis-${name}`;
@@ -104,12 +116,17 @@ export function createAxes(theme: SceneTheme): Axes {
     group.add(arrow);
 
     const labelTexture = makeLabelTexture(name, axisColor(theme, name));
-    const labelMaterial = new SpriteMaterial({ map: labelTexture, depthTest: false, transparent: true });
+    const labelMaterial = new SpriteMaterial({
+      map: labelTexture,
+      depthTest: false,
+      transparent: true,
+      opacity: AXES_OPACITY,
+      sizeAttenuation: false,
+    });
     const label = new Sprite(labelMaterial);
     label.name = `axis-label-${name}`;
     label.renderOrder = 10;
-    const labelSize = mmToM(LABEL_SIZE_MM);
-    label.scale.set(labelSize, labelSize, 1);
+    label.scale.set(LABEL_SCREEN_SCALE, LABEL_SCREEN_SCALE, 1);
     label.position.copy(direction).multiplyScalar(length + mmToM(LABEL_GAP_MM));
     group.add(label);
 
@@ -121,6 +138,11 @@ export function createAxes(theme: SceneTheme): Axes {
     labelPosition(name) {
       const part = parts.find((p) => p.name === name);
       return part ? part.label.getWorldPosition(new Vector3()) : new Vector3();
+    },
+    setScreen(heightPx, fovDeg) {
+      // Спрайт без зменшення з відстанню: висота на екрані = scale · H / (2 · tan(fov/2)).
+      const scale = (LABEL_PX * 2 * Math.tan((fovDeg * Math.PI) / 360)) / Math.max(1, heightPx);
+      for (const part of parts) part.label.scale.set(scale, scale, 1);
     },
     setTheme(next) {
       for (const part of parts) {

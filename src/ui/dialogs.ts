@@ -75,7 +75,8 @@ export function createAlert(): Alert {
       title.textContent = heading;
       text.textContent = message;
       backdrop.hidden = false;
-      ok.focus();
+      // Фокус на кнопку — лише для клавіатури (без товстої рамки після дотику, як в iOS).
+      ok.focus({ focusVisible: false } as FocusOptions);
     },
   };
 }

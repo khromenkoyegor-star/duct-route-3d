@@ -12,7 +12,7 @@
  */
 import {
   createStickController,
-  joystickDirections,
+  joystickLayout,
   movePoint,
   type NudgeAxis,
   type PointM,
@@ -231,10 +231,8 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     }
     const screen = viewer.screenAxes(point);
     // Стрілки на самому джойстику — куди він рухає X і Z (з урахуванням «розведення» осей).
-    stick.setAxes(
-      controller.dirs ?? joystickDirections({ X: screen.X, Z: screen.Z }),
-      axis === 'X' || axis === 'Z' ? axis : null,
-    );
+    const layout = joystickLayout({ X: screen.X, Z: screen.Z });
+    stick.setAxes(controller.dirs ?? layout.dirs, axis === 'X' || axis === 'Z' ? axis : null, layout.layout.depth ?? null);
     const base = viewer.projectPoint(point);
     overlay.hidden = !base.visible;
     if (!base.visible) return;
