@@ -24,7 +24,7 @@ import {
   sliderStep,
   type Vec2,
 } from '../core/nudge';
-import { distance, lockedAxis, NODE_TOLERANCE_MM, type SegmentDir, stepAlongSegment } from '../core/route';
+import { canAppendNode, distance, lockedAxis, type SegmentDir, stepAlongSegment } from '../core/route';
 import { formatMm, mmToM, mToMm } from '../core/units';
 import type { Viewer } from '../scene/viewer';
 import { createStick } from './joystick';
@@ -73,6 +73,11 @@ export interface PointEditor {
   readonly state: PointEditorState;
   /** Почати доведення точки (або замінити точку, якщо редагування вже йде). */
   edit(point: PointM, label: string, options?: EditOptions): void;
+  /**
+   * Коротке пояснення біля джойстика (замість рядка «Відрізок / Зсув») — на кілька секунд
+   * або доки точку не зрушать. wiggle — «посмикати» кульки джойстика й повзунка: тягнути — ними.
+   */
+  notice(text: string, options?: { wiggle?: boolean }): void;
   close(): void;
   dispose(): void;
 }
@@ -97,6 +102,9 @@ const AXES: NudgeAxis[] = ['X', 'Y', 'Z'];
 const ANCHOR_DETENT_MS = 400;
 
 const samePoint = (a: PointM, b: PointM) => a.x === b.x && a.y === b.y && a.z === b.z;
+/** Скільки триває пояснення біля джойстика (notice), мс. */
+const NOTICE_MS = 4000;
+const AXIS_KEY: Record<NudgeAxis, 'x' | 'y' | 'z'> = { X: 'x', Y: 'y', Z: 'z' };
 
 /** «X 1 234,5 · Y 1 200 · Z −300 мм» з кольоровими літерами. */
 function coordinates(point: PointM): Array<string | HTMLElement> {
@@ -150,12 +158,20 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   let blockedBack = false;
   /** До цього часу точка «стоїть» на початку відрізка (див. ANCHOR_DETENT_MS). */
   let detentUntil = 0;
+  /** Пояснення біля джойстика (notice) і таймер, що його прибирає. */
+  let noticeText: string | null = null;
+  let noticeTimer = 0;
+  const clearNotice = () => {
+    noticeText = null;
+    if (noticeTimer) window.clearTimeout(noticeTimer);
+    noticeTimer = 0;
+  };
   const controller = createStickController();
 
   /** Вісь, по якій уже йде відрізок (null — не режим відрізка або точка на початку). */
   const segmentAxis = (): NudgeAxis | null => (segment && point ? lockedAxis(segment.anchor, point) : null);
   const segmentLengthMm = () => (segment && point ? mToMm(distance(segment.anchor, point)) : 0);
-  const canConfirm = () => !!point && (!segment || (segmentAxis() !== null && segmentLengthMm() > NODE_TOLERANCE_MM));
+  const canConfirm = () => !!point && (!segment || (segmentAxis() !== null && canAppendNode(segment.anchor, point)));
 
   /** Зсунути точку на крок; true — точка змінилась. */
   const apply = (stepAxis: NudgeAxis, deltaMm: number, now: number): boolean => {
@@ -206,6 +222,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       }
     }
     if (changed) {
+      clearNotice();
       handlers.onChange(point);
       viewer.requestRender();
     }
@@ -241,6 +258,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     testid: 'stick-xz',
     onActiveChange(isActive) {
       if (isActive) {
+        if (segmentAxis() === 'Y') showNotice('Джойстик зараз не діє: відрізок іде по Y. Щоб змінити вісь, поверніть точку на початок');
         startLoop();
         return;
       }
@@ -262,6 +280,10 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     testid: 'stick-y',
     onActiveChange(isActive) {
       if (isActive) {
+        const locked = segmentAxis();
+        if (locked === 'X' || locked === 'Z') {
+          showNotice(`Повзунок зараз не діє: відрізок іде по ${locked}. Щоб змінити вісь, поверніть точку на початок`);
+        }
         startLoop();
         return;
       }
@@ -311,8 +333,14 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     overlay.hidden = !base.visible;
     if (!base.visible) return;
     const longest = Math.max(...AXES.map((a) => Math.hypot(screen[a].x, screen[a].y)));
+    const locked = segmentAxis();
     for (const arrow of arrows) {
-      const dir: Vec2 = screen[arrow.name];
+      let dir: Vec2 = screen[arrow.name];
+      // Відрізок уже йде по цій осі: стрілка — в бік руху, геть від початку відрізка
+      // (інакше вона лягає на сам відрізок і закриває його й підпис довжини).
+      if (segment && locked === arrow.name && point[AXIS_KEY[locked]] < segment.anchor[AXIS_KEY[locked]]) {
+        dir = { x: -dir.x, y: -dir.y };
+      }
       const len = Math.hypot(dir.x, dir.y);
       // Вісь, що «дивиться в камеру», не малюємо — по ній джойстик і не рухає.
       const visible = len > 0 && len >= longest * 0.15;
@@ -356,7 +384,12 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       control.classList.toggle('stick--off', off);
       control.setAttribute('aria-disabled', String(off));
     }
-    shift.classList.toggle('point-shift--warning', segment !== null && blockedBack);
+    shift.classList.toggle('point-shift--warning', noticeText !== null || (segment !== null && blockedBack));
+    if (noticeText) {
+      shift.textContent = noticeText;
+      drawArrows();
+      return;
+    }
     if (segment) {
       shift.textContent = segmentText(locked);
       drawArrows();
@@ -382,6 +415,27 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     const key = locked.toLowerCase() as 'x' | 'y' | 'z';
     const offset = mToMm(point[key] - segment.anchor[key]);
     return `Відрізок: ${locked} ${offset > 0 ? '+' : '−'}${formatMm(Math.abs(offset))}`;
+  }
+
+  function showNotice(text: string, wiggle = false): void {
+    clearNotice();
+    noticeText = text;
+    noticeTimer = window.setTimeout(() => {
+      noticeText = null;
+      noticeTimer = 0;
+      render();
+    }, NOTICE_MS);
+    if (wiggle) {
+      for (const control of [stick.element, slider.element]) {
+        if (control.classList.contains('stick--off')) continue;
+        control.classList.remove('stick--wiggle');
+        // Перезапуск анімації: прочитати розмір між зняттям і додаванням класу.
+        void control.offsetWidth;
+        control.classList.add('stick--wiggle');
+        control.addEventListener('animationend', () => control.classList.remove('stick--wiggle'), { once: true });
+      }
+    }
+    render();
   }
 
   confirm.addEventListener('click', () => {
@@ -415,6 +469,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       customTitle = options.title ?? null;
       blockedBack = false;
       detentUntil = 0;
+      clearNotice();
       element.hidden = false;
       render();
       viewer.requestRender();
@@ -429,11 +484,17 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       label = null;
       customTitle = null;
       segment = null;
+      clearNotice();
       element.hidden = true;
       overlay.hidden = true;
       viewer.requestRender();
     },
+    notice(text, options = {}) {
+      if (element.hidden) return;
+      showNotice(text, options.wiggle ?? false);
+    },
     dispose() {
+      clearNotice();
       stopLoop();
       stopFrames();
       stick.dispose();

@@ -12,29 +12,55 @@ export function obstacleRects(): DOMRect[] {
     .filter((r) => r.width > 0 && r.height > 0);
 }
 
+export interface ScreenRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** Висока бічна панель (частка висоти екрана): поруч із нею теж може бути вільне місце. */
+const TALL_PANEL = 0.4;
+
 /**
- * Центр вільної від панелей частини екрана: смуга між верхніми й нижніми панелями
- * або місце праворуч від редактора точки (iPhone горизонтально). null — вільного місця замало.
+ * Найбільша вільна від панелей частина екрана: смуга між верхніми й нижніми панелями
+ * або місце між високими бічними панелями (редактор точки зліва, панель траси справа на iPhone
+ * горизонтально). null — вільного місця замало.
  */
-export function freeAreaCenter(): ScreenPoint | null {
+export function freeAreaRect(): ScreenRect | null {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const obstacles = obstacleRects();
-  const free = (left: number, right: number) => {
+  const free = (left: number, right: number): ScreenRect => {
     const overlapping = obstacles.filter((r) => r.right > left && r.left < right);
     const top = Math.max(0, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
     const bottom = Math.min(vh, ...overlapping.filter((r) => r.top >= vh / 2).map((r) => r.top));
     return { left, right, top, bottom };
   };
-  const candidates = [free(0, vw)];
+  // Межі, по яких можна «розрізати» екран: краї редактора точки й високих бічних панелей.
   const editor = [...document.querySelectorAll<HTMLElement>('.point-editor')].find((el) => !el.hidden);
   const editorRect = editor?.getBoundingClientRect();
-  if (editorRect && editorRect.width > 0 && editorRect.right < vw * 0.75) candidates.push(free(editorRect.right, vw));
-  const score = (c: { left: number; right: number; top: number; bottom: number }) =>
-    Math.min(c.right - c.left, c.bottom - c.top);
-  const best = candidates.reduce((a, b) => (score(b) > score(a) ? b : a));
-  if (score(best) < 60) return null;
-  return { x: (best.left + best.right) / 2, y: (best.top + best.bottom) / 2 };
+  const sides = obstacles.filter((r) => r.height > vh * TALL_PANEL && r.width < vw * 0.6);
+  if (editorRect && editorRect.width > 0 && editorRect.right < vw * 0.75) sides.push(editorRect);
+  const lefts = [0, ...sides.map((r) => r.right)];
+  const rights = [vw, ...sides.map((r) => r.left)];
+  const score = (c: ScreenRect) => Math.min(c.right - c.left, c.bottom - c.top);
+  let best: ScreenRect | null = null;
+  for (const a of lefts) {
+    for (const b of rights) {
+      if (b - a < 60) continue;
+      const c = free(a, b);
+      if (!best || score(c) > score(best)) best = c;
+    }
+  }
+  if (!best || score(best) < 60) return null;
+  return best;
+}
+
+/** Центр вільної від панелей частини екрана (див. freeAreaRect) або null. */
+export function freeAreaCenter(): ScreenPoint | null {
+  const rect = freeAreaRect();
+  return rect ? { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 } : null;
 }
 
 /**

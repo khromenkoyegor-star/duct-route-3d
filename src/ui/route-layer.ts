@@ -36,8 +36,13 @@ export interface RouteLayer {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const NODE_R = 6;
-/** Підпис довжини показуємо лише на відрізку, довшому на екрані за це (інакше підписи злипаються). */
+/**
+ * Підпис довжини показуємо лише на відрізку, довшому на екрані за сам підпис із запасом
+ * (інакше він закриває короткий відрізок, а підписи злипаються).
+ */
 const LABEL_MIN_PX = 64;
+const LABEL_CHAR_PX = 8.6;
+const LABEL_SPARE_PX = 38;
 /** Номер траси — на цій відстані від першої точки, з протилежного від траси боку (не закриває її). */
 const TAG_OFFSET_PX = 26;
 
@@ -123,7 +128,9 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
   const addLabel = (seg: [ScreenPoint, ScreenPoint] | null | undefined, lengthMm: number, live: boolean) => {
     if (!seg) return;
     const [a, b] = seg;
-    if (Math.hypot(b.x - a.x, b.y - a.y) < LABEL_MIN_PX) return;
+    const text = formatMm(lengthMm);
+    const needed = Math.max(LABEL_MIN_PX, text.length * LABEL_CHAR_PX + LABEL_SPARE_PX);
+    if (Math.hypot(b.x - a.x, b.y - a.y) < needed) return;
     let label = labels[labelCount];
     if (!label) {
       label = document.createElement('span');
@@ -133,7 +140,7 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     }
     labelCount += 1;
     label.hidden = false;
-    label.textContent = formatMm(lengthMm);
+    label.textContent = text;
     label.classList.toggle('route-length--live', live);
     label.style.transform = `translate(${fmt((a.x + b.x) / 2)}px, ${fmt((a.y + b.y) / 2)}px) translate(-50%, -50%)`;
   };
@@ -150,29 +157,59 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     p.nodes.setAttribute('d', circlesPath(projected.nodes, nodes.length));
     p.pendingNode.setAttribute('d', pending ? circlesPath(projected.nodes.slice(nodes.length)) : '');
     const highlighted = data.highlight === id;
+    const dim = data.highlight !== null && !highlighted;
+    // Поки будують нову трасу, готові приглушені — не сплутати, яку саме будуєш.
+    const background = data.highlight === null && data.draft !== null && key !== 'draft';
     p.group.setAttribute(
       'class',
       `route${key === 'draft' ? ' route--draft' : ''}${highlighted ? ' route--highlight' : ''}` +
-        `${data.highlight !== null && !highlighted ? ' route--dim' : ''}`,
+        `${dim ? ' route--dim' : ''}${background ? ' route--background' : ''}`,
     );
     const first = projected.nodes[0];
     p.tag.hidden = !first?.visible;
     p.tag.textContent = String(id);
     p.tag.classList.toggle('route-tag--highlight', highlighted);
-    p.tag.classList.toggle('route-tag--dim', data.highlight !== null && !highlighted);
+    p.tag.classList.toggle('route-tag--dim', dim);
+    p.tag.classList.toggle('route-tag--background', background);
     if (first?.visible) {
-      const second = projected.nodes[1];
-      const len = second?.visible ? Math.hypot(second.x - first.x, second.y - first.y) : 0;
-      // Без другої точки (чи вона на тому самому місці екрана) — над першою.
-      const dx = len > 1 ? -(second!.x - first.x) / len : 0;
-      const dy = len > 1 ? -(second!.y - first.y) / len : -1;
+      const away = tagDirection(first, projected.nodes[1], all[0]!);
       p.tag.style.transform =
-        `translate(${fmt(first.x + dx * TAG_OFFSET_PX)}px, ${fmt(first.y + dy * TAG_OFFSET_PX)}px) translate(-50%, -50%)`;
+        `translate(${fmt(first.x + away.x * TAG_OFFSET_PX)}px, ${fmt(first.y + away.y * TAG_OFFSET_PX)}px) translate(-50%, -50%)`;
     }
     if (!withLengths) return;
     for (let i = 1; i < all.length; i++) {
       addLabel(projected.segments[i - 1], mToMm(distance(all[i - 1]!, all[i]!)), i === all.length - 1 && !!pending);
     }
+  };
+
+  /**
+   * Куди від першої точки ставити номер: з протилежного від траси боку; якщо другої точки ще немає
+   * (чи вона на тому самому місці екрана) — туди, де немає стрілок осей X, Y, Z біля точки.
+   */
+  const tagDirection = (first: ScreenPoint, second: (ScreenPoint & { visible: boolean }) | undefined, world: PointM) => {
+    const len = second?.visible ? Math.hypot(second.x - first.x, second.y - first.y) : 0;
+    if (len > 1) return { x: -(second!.x - first.x) / len, y: -(second!.y - first.y) / len };
+    const axes = viewer.screenAxes(world);
+    const lines = (['X', 'Y', 'Z'] as const)
+      .map((a) => axes[a])
+      .map((v) => ({ v, l: Math.hypot(v.x, v.y) }))
+      .filter((a) => a.l > 0)
+      .map((a) => ({ x: a.v.x / a.l, y: a.v.y / a.l }));
+    let best = { x: 0, y: -1 };
+    let bestGap = -1;
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      const c = { x: Math.cos(angle), y: Math.sin(angle) };
+      // Найменший кут до стрілок (вони йдуть лише в один бік від точки).
+      const gap = Math.min(Math.PI, ...lines.map((d) => Math.acos(Math.max(-1, Math.min(1, c.x * d.x + c.y * d.y)))));
+      // За рівних — ближче до «вгору-праворуч», де номер звично шукати.
+      const score = gap - 0.01 * Math.hypot(c.x - 0.7, c.y + 0.7);
+      if (score > bestGap) {
+        bestGap = score;
+        best = c;
+      }
+    }
+    return best;
   };
 
   const draw = () => {
@@ -210,7 +247,7 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     element,
     update(next) {
       data = next;
-      draw();
+      // Малюється в найближчому кадрі сцени (onFrame) — раз за кадр, навіть якщо оновлень було кілька.
       viewer.requestRender();
     },
     dispose() {

@@ -1,3 +1,5 @@
+import { ICON_SHOW_ALL } from './icons';
+
 /**
  * Кнопки видів X, Y, Z (зверху зліва): камера стає строго вздовж осі —
  * X — вид збоку, Y — згори (план), Z — спереду. Повторне натискання — вид з протилежного боку.
@@ -26,7 +28,11 @@ export function viewCaption(axis: ViewAxis, side: 1 | -1): string {
 
 const TOAST_MS = 1500;
 
-export function createViewBar(onView: (axis: ViewAxis) => void): ViewBar {
+/**
+ * onShowAll — кнопка «Показати все» в цьому ж блоці: видно лише на iPhone вертикально, поки
+ * доводять точку (тоді нижня панель кнопок схована — там джойстик; див. style.css).
+ */
+export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () => void): ViewBar {
   const element = document.createElement('div');
   element.className = 'view-area';
 
@@ -45,6 +51,17 @@ export function createViewBar(onView: (axis: ViewAxis) => void): ViewBar {
     button.addEventListener('click', () => onView(axis));
     buttons.set(axis, button);
     bar.append(button);
+  }
+
+  if (onShowAll) {
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'view-button view-button--all';
+    all.dataset.testid = 'view-all';
+    all.innerHTML = ICON_SHOW_ALL;
+    all.setAttribute('aria-label', 'Показати все');
+    all.addEventListener('click', onShowAll);
+    bar.append(all);
   }
 
   const toast = document.createElement('p');

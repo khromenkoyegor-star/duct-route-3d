@@ -12,6 +12,7 @@
 import type { PointM } from '../core/nudge';
 import {
   addRoute,
+  distance,
   emptyRouteSet,
   formatPointCount,
   isValidRoute,
@@ -20,14 +21,15 @@ import {
   type RouteSet,
   removeRoute,
   routeLength,
+  toM,
   toMm,
 } from '../core/route';
-import { formatMm } from '../core/units';
+import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
 import { createPointEditor, type PointEditorState } from './point-editor';
 import { createRouteLayer } from './route-layer';
 import { createRetapGuard, HINT_CONFIRM_MOVE, onTap } from './tap';
-import { keepVisible } from './visibility';
+import { freeAreaRect, keepVisible } from './visibility';
 
 /** off — режим вимкнено; first — чекаємо дотик першої точки; editFirst — доводимо її; pull — тягнемо наступну. */
 export type RoutePhase = 'off' | 'first' | 'editFirst' | 'pull';
@@ -58,6 +60,8 @@ export interface RouteTool {
   remove(id: number): void;
   /** Підсвітити трасу (null — зняти). */
   setHighlight(id: number | null): void;
+  /** Показати трасу цілком у вільній від панелей частині екрана (якщо її щось закриває). */
+  reveal(id: number): void;
   /** Прибрати всі траси (відкрили інший скан). Номери починаються знову з 1. */
   clearAll(): void;
   /** Підставити готовий набір трас (тести; пізніше — відкриття збереженого проєкту). */
@@ -72,6 +76,26 @@ const HINTS: Record<Exclude<RoutePhase, 'off'>, string> = {
 };
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
 const HINT_PULL_TAP = 'Наступна точка не ставиться дотиком — тягніть її джойстиком чи повзунком';
+/** Уперше за відкриття додатка тягнуть наступну точку — «посмикати» джойстик, щоб було видно чим. */
+let pullShown = false;
+
+/** Кнопка з повною назвою (iPad) і короткою (iPhone; див. style.css). Повна — для VoiceOver. */
+function panelButton(testid: string, full: string, short: string, primary = false): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = primary ? 'panel-button panel-button--primary' : 'panel-button';
+  button.dataset.testid = testid;
+  const long = document.createElement('span');
+  long.className = 'label-full';
+  long.textContent = full;
+  const brief = document.createElement('span');
+  brief.className = 'label-short';
+  brief.textContent = short;
+  brief.setAttribute('aria-hidden', 'true');
+  button.append(long, brief);
+  button.setAttribute('aria-label', full);
+  return button;
+}
 
 export function createRouteTool(
   viewer: Viewer,
@@ -110,16 +134,8 @@ export function createRouteTool(
   info.dataset.testid = 'route-info';
   const actions = document.createElement('div');
   actions.className = 'route-actions';
-  const removeLast = document.createElement('button');
-  removeLast.type = 'button';
-  removeLast.className = 'panel-button';
-  removeLast.dataset.testid = 'route-remove-last';
-  removeLast.textContent = 'Видалити останню точку';
-  const finishButton = document.createElement('button');
-  finishButton.type = 'button';
-  finishButton.className = 'panel-button panel-button--primary';
-  finishButton.dataset.testid = 'route-finish';
-  finishButton.textContent = 'Завершити побудову траєкторії';
+  const removeLast = panelButton('route-remove-last', 'Видалити останню точку', 'Видалити точку');
+  const finishButton = panelButton('route-finish', 'Завершити побудову траєкторії', 'Завершити трасу', true);
   actions.append(removeLast, finishButton);
   panel.append(head, text, sub, info, actions);
 
@@ -134,7 +150,6 @@ export function createRouteTool(
   let pending: PointM | null = null;
   let highlight: number | null = null;
   let missed = false;
-  let pullTapped = false;
   let downView: ViewSnapshot | null = null;
   const retap = createRetapGuard(() => render());
 
@@ -143,8 +158,6 @@ export function createRouteTool(
   const editor = createPointEditor(viewer, {
     onChange(point) {
       pending = point;
-      // Точку вже тягнуть — підказка про дотик більше не потрібна.
-      pullTapped = false;
       render();
     },
     onConfirm(point) {
@@ -152,7 +165,6 @@ export function createRouteTool(
       nodes = [...nodes, { ...point }];
       retap.clear();
       missed = false;
-      pullTapped = false;
       startPull();
       render();
     },
@@ -169,6 +181,10 @@ export function createRouteTool(
     pending = { ...anchor };
     editor.edit(anchor, '', { title: editorTitle(), segment: { anchor, back: lastDirection(nodes) } });
     handlers.onEditingChange?.(true);
+    if (!pullShown) {
+      pullShown = true;
+      editor.notice('Тягніть наступну точку джойстиком (X, Z) чи повзунком (Y)', { wiggle: true });
+    }
   }
 
   const state = (): RouteToolState => ({
@@ -184,12 +200,17 @@ export function createRouteTool(
     panel.hidden = !active;
     title.textContent = `Траса ${set.nextId}`;
     if (active && phase !== 'off') text.textContent = HINTS[phase];
-    const warning = missed ? HINT_MISS : retap.waiting ? HINT_CONFIRM_MOVE : pullTapped ? HINT_PULL_TAP : '';
+    const warning = missed ? HINT_MISS : retap.waiting ? HINT_CONFIRM_MOVE : '';
     sub.textContent = warning;
     sub.hidden = warning === '';
     sub.classList.toggle('ruler-sub--warning', warning !== '');
     const mm = nodes.map(toMm);
-    info.textContent = nodes.length ? `${formatPointCount(nodes.length)} · ${formatMm(routeLength(mm))}` : '';
+    // Відрізок, який зараз тягнуть, — у дужках (ще не підтверджений).
+    const pendingMm = phase === 'pull' && pending && nodes.length ? mToMm(distance(nodes.at(-1)!, pending)) : 0;
+    let summary = `${formatPointCount(nodes.length)} · ${formatMm(routeLength(mm))}`;
+    if (pendingMm >= 0.05) summary += ` (+${formatMm(pendingMm)})`;
+    else if (nodes.length === 1) summary = '1 точка — щоб завершити, потрібна ще одна';
+    info.textContent = nodes.length ? summary : '';
     info.hidden = nodes.length === 0;
     removeLast.disabled = nodes.length === 0;
     finishButton.disabled = nodes.length < 2;
@@ -211,7 +232,6 @@ export function createRouteTool(
     nodes = [];
     pending = null;
     missed = false;
-    pullTapped = false;
     retap.clear();
     closeEditor();
     phase = active ? 'first' : 'off';
@@ -221,7 +241,6 @@ export function createRouteTool(
     if (nodes.length === 0) return;
     nodes = nodes.slice(0, -1);
     missed = false;
-    pullTapped = false;
     retap.clear();
     if (nodes.length === 0) {
       // Прибрали першу точку — знову чекаємо дотик по скану.
@@ -255,9 +274,8 @@ export function createRouteTool(
     onTap: (x, y) => {
       if (!active) return;
       if (phase === 'pull') {
-        // Наступна точка тягнеться лише джойстиком — дотик лише підказує, як.
-        pullTapped = true;
-        render();
+        // Наступна точка тягнеться лише джойстиком — дотик лише підказує як, біля самого джойстика.
+        editor.notice(HINT_PULL_TAP, { wiggle: true });
         return;
       }
       // Скасувати мікроповорот камери від тремтіння — шукаємо точку в тому кадрі, куди цілились.
@@ -310,6 +328,25 @@ export function createRouteTool(
     setHighlight(id) {
       highlight = id;
       render();
+    },
+    reveal(id) {
+      const route = set.routes.find((r) => r.id === id);
+      if (!route) return;
+      const points = route.nodes.map(toM);
+      const area = freeAreaRect();
+      const bounds = area ?? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+      const margin = 24;
+      const inside = viewer
+        .projectPath(points)
+        .nodes.every(
+          (n) =>
+            n.visible &&
+            n.x > bounds.left + margin &&
+            n.x < bounds.right - margin &&
+            n.y > bounds.top + margin &&
+            n.y < bounds.bottom - margin,
+        );
+      if (!inside) viewer.fitPoints(points, area ?? undefined);
     },
     clearAll() {
       set = emptyRouteSet();

@@ -43,7 +43,7 @@ export function createRouteDelete(handlers: RouteDeleteHandlers): RouteDeletePan
   head.append(title, close);
   const hint = document.createElement('p');
   hint.className = 'ruler-sub';
-  hint.textContent = 'Виберіть трасу — її підсвічено на сцені';
+  hint.textContent = 'Виберіть трасу — вона стане червоною на сцені';
   const list = document.createElement('ul');
   list.className = 'route-list';
   list.dataset.testid = 'route-list';

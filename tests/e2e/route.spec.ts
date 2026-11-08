@@ -181,7 +181,8 @@ test.describe('Траса: побудова полілінії', () => {
     expect(r.phase).toBe('pull');
     expect(r.building.nodes).toHaveLength(1);
     expect(r.editor.point).toEqual(r.editor.segment.anchor);
-    await expect(page.getByTestId('route-sub')).toContainText('джойстиком');
+    // Підказка — біля самого джойстика.
+    await expect(page.getByTestId('point-shift').filter({ visible: true })).toContainText('не ставиться дотиком');
   });
 
   test('«Видалити останню точку»: прибирає вузол, наступна тягнеться від попереднього', async ({ page }) => {

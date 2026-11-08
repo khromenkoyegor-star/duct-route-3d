@@ -101,6 +101,12 @@ export interface Viewer {
    * екрана `at` (CSS px) — наприклад, у вільній від панелей частині. Камера не рухається.
    */
   centerOn(point: Vec3Like, at?: ScreenPoint): void;
+  /**
+   * Показати точки (м) цілком, не змінюючи напрямку погляду: камера наближається чи віддаляється
+   * й зсувається паралельно екрану так, щоб усі точки вмістились у прямокутник `area` (CSS px) —
+   * наприклад, у вільну від панелей частину екрана (інакше — у весь кадр).
+   */
+  fitPoints(points: readonly Vec3Like[], area?: { left: number; right: number; top: number; bottom: number }): void;
   /** Запам'ятати положення камери (наприклад, у момент натискання). */
   snapshotView(): ViewSnapshot;
   /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
@@ -409,6 +415,46 @@ export function createViewer(container: HTMLElement): Viewer {
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObject(scanGroup, true)[0];
       return hit ? hit.point.clone() : null;
+    },
+    fitPoints(points, area) {
+      if (points.length === 0) return;
+      flushInertia();
+      const box = new Box3().setFromPoints(points.map((p) => new Vector3(p.x, p.y, p.z)));
+      const sphere = box.getBoundingSphere(new Sphere());
+      // Коротку трасу не наближаємо впритул: принаймні коло радіусом 0,3 м.
+      const radius = Math.max(sphere.radius, 0.3);
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      const a = area ?? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+      const tanV = Math.tan((camera.fov * Math.PI) / 360);
+      const tanH = tanV * camera.aspect;
+      // Півкут, під яким видно прямокутник `area` (якби він був по центру кадру).
+      const half = Math.min(
+        Math.atan(tanV * Math.max(0.05, (a.bottom - a.top) / height)),
+        Math.atan(tanH * Math.max(0.05, (a.right - a.left) / width)),
+      );
+      const distance = (radius / Math.sin(half)) * 1.1;
+      let dir = camera.position.clone().sub(controls.target).normalize();
+      if (!Number.isFinite(dir.x) || dir.lengthSq() === 0) dir = VIEW_DIRECTION.clone();
+      controls.target.copy(sphere.center);
+      camera.position.copy(sphere.center).addScaledVector(dir, distance);
+      camera.far = Math.max(camera.far, (distance + radius) * 4);
+      camera.updateProjectionMatrix();
+      controls.maxDistance = Math.max(controls.maxDistance, distance * 2);
+      camera.lookAt(sphere.center);
+      // Паралельний зсув: центр точок — у центр прямокутника `area`.
+      const metresPerPx = (2 * distance * tanV) / height;
+      const dx = ((a.left + a.right) / 2 - (rect.left + width / 2)) * metresPerPx;
+      const dy = ((a.top + a.bottom) / 2 - (rect.top + height / 2)) * metresPerPx;
+      camera.updateMatrixWorld();
+      const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      const shift = right.multiplyScalar(-dx).add(up.multiplyScalar(dy));
+      camera.position.add(shift);
+      controls.target.add(shift);
+      controls.update();
+      requestRender();
     },
     snapshotView() {
       return { position: camera.position.clone(), target: controls.target.clone() };

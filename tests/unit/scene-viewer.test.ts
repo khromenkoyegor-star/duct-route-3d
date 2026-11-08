@@ -331,6 +331,36 @@ describe('сцена: осі й масштаб', () => {
     expect(projected.segments[2]).toBeNull();
     s.viewer.dispose();
   });
+
+  it('fitPoints(): усі точки — у заданій частині екрана, напрямок погляду той самий', () => {
+    const s = setup();
+    s.viewer.setView({ x: 3, y: 4, z: 6 }, { x: 0, y: 1, z: 0 });
+    s.tick();
+    const before = s.viewer.snapshotView();
+    const dirBefore = before.position.clone().sub(before.target).normalize();
+    const points = [
+      { x: -2, y: 2.4, z: -1.3 },
+      { x: 0.8, y: 2.4, z: -1.3 },
+      { x: 0.8, y: 2.4, z: 0.6 },
+      { x: 0.8, y: 0.5, z: 0.6 },
+    ];
+    // Ліва половина екрана під верхньою смугою (праву займає панель).
+    const area = { left: 0, right: 590, top: 60, bottom: 820 };
+    s.viewer.fitPoints(points, area);
+    s.tick();
+    for (const p of points) {
+      const sp = s.viewer.projectPoint(p);
+      expect(sp.visible).toBe(true);
+      expect(sp.x).toBeGreaterThan(area.left);
+      expect(sp.x).toBeLessThan(area.right);
+      expect(sp.y).toBeGreaterThan(area.top);
+      expect(sp.y).toBeLessThan(area.bottom);
+    }
+    const after = s.viewer.snapshotView();
+    const dirAfter = after.position.clone().sub(after.target).normalize();
+    expect(dirAfter.dot(dirBefore)).toBeGreaterThan(0.9999);
+    s.viewer.dispose();
+  });
 });
 
 describe('сцена: малювання тільки при змінах', () => {

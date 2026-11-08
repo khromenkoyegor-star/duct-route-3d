@@ -106,7 +106,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         ? viewer.viewAlong(axis, editing.point, freeAreaCenter() ?? undefined)
         : viewer.viewAlong(axis);
     viewBar.setActive(axis, side);
-  });
+  }, () => viewer.showAll('current'));
   // Камеру повернули рукою — вид уже не «строго вздовж осі».
   viewer.onUserCamera(() => viewBar.setActive(null));
   const progress = createProgress();
@@ -133,7 +133,11 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   });
 
   const routeDelete = createRouteDelete({
-    onSelect: (id) => route.setHighlight(id),
+    onSelect: (id) => {
+      route.setHighlight(id);
+      // Вибрану трасу має бути видно цілком (на iPhone її легко закриває сам список).
+      if (id !== null) route.reveal(id);
+    },
     onDelete: (id) => {
       route.remove(id);
       // Трас не лишилось — список закривається.

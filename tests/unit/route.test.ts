@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addRoute,
   emptyRouteSet,
+  canAppendNode,
   formatPointCount,
   isValidRoute,
   lastDirection,
@@ -153,5 +154,24 @@ describe('підпис кількості точок', () => {
       [502, '502 точки'],
     ];
     for (const [n, text] of cases) expect(formatPointCount(n)).toBe(text);
+  });
+});
+
+describe('чи можна підтвердити наступну точку', () => {
+  it('те саме правило, що й у перевірці траси: що підтвердили — «Завершити» прийме', () => {
+    const anchor = { x: 0.5, y: 0, z: 0.4 };
+    for (const offsetMm of [0.05, 0.1, 0.1000001, 0.10001, 0.2, 1, 1234.5]) {
+      const point = { ...anchor, x: anchor.x + offsetMm / 1000 };
+      const ok = canAppendNode(anchor, point);
+      expect(ok).toBe(isValidRoute([toMm(anchor), toMm(point)]));
+      if (ok) expect(() => addRoute(emptyRouteSet(), [toMm(anchor), toMm(point)])).not.toThrow();
+    }
+    expect(canAppendNode(anchor, anchor)).toBe(false);
+    expect(canAppendNode(anchor, { ...anchor, x: anchor.x + 0.001 })).toBe(true);
+  });
+
+  it('траса з пошкодженими координатами — не за правилами', () => {
+    expect(isValidRoute([{ x: 0, y: 0, z: 0 }, { x: Number.NaN, y: 0, z: 0 }])).toBe(false);
+    expect(isValidRoute([{ x: 0, y: 0, z: 0 }, { x: Infinity, y: 0, z: 0 }])).toBe(false);
   });
 });

@@ -100,6 +100,8 @@ export function segmentAxis(a: P3, b: P3, tolerance = 0): NudgeAxis | null {
  */
 export function isValidRoute(nodes: readonly PointMm[], toleranceMm = NODE_TOLERANCE_MM): boolean {
   if (nodes.length < 2) return false;
+  // Пошкоджені координати (NaN, нескінченність) — траса не за правилами.
+  if (!nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z))) return false;
   let previous: SegmentDir | null = null;
   for (let i = 1; i < nodes.length; i++) {
     const dir = segmentDirection(nodes[i - 1]!, nodes[i]!, toleranceMm);
@@ -108,6 +110,14 @@ export function isValidRoute(nodes: readonly PointMm[], toleranceMm = NODE_TOLER
     previous = dir;
   }
   return true;
+}
+
+/**
+ * Чи можна підтвердити наступну точку (м сцени) від попереднього вузла: той самий допуск і те саме
+ * переведення в мм, що й у перевірці траси (isValidRoute) — що підтвердили, те «Завершити» прийме.
+ */
+export function canAppendNode(anchorM: P3, pointM: P3): boolean {
+  return segmentDirection(toMm(anchorM), toMm(pointM), NODE_TOLERANCE_MM) !== null;
 }
 
 /** Додати завершену трасу: отримує наступний номер. */

@@ -1468,7 +1468,6 @@ body {
 .route-layer {
   position: absolute;
   inset: 0;
-  z-index: 1;
   overflow: hidden;
   pointer-events: none;
 }
@@ -1525,11 +1524,17 @@ body {
   opacity: 0.35;
 }
 
+.route--background {
+  opacity: 0.5;
+}
+
 .route-tag,
 .route-length {
   position: absolute;
   left: 0;
   top: 0;
+  /* Над стрілками осей біля точки (.axis-overlay), але під панелями. */
+  z-index: 2;
   white-space: nowrap;
   will-change: transform;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
@@ -1557,12 +1562,16 @@ body {
   opacity: 0.35;
 }
 
+.route-tag--background {
+  opacity: 0.5;
+}
+
 .route-length {
   padding: 1px 7px;
   border-radius: 8px;
   background: var(--card-bg);
-  color: var(--route);
-  font-size: 13px;
+  color: var(--route-text);
+  font-size: 15px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -1735,5 +1744,164 @@ body {
 
   .route-list {
     max-height: 45vh;
+  }
+}
+
+/* ───────── Етап 2: правки за UX-рецензією ───────── */
+
+:root {
+  --route-text: var(--route);
+  /* Суцільні кольори панелей траси й редактора: над світлою стіною скану текст має читатися. */
+  --solid-panel-bg: rgba(255, 255, 255, 0.92);
+  --solid-fill: #e9e9eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --route-text: #b4b3ff;
+    --solid-panel-bg: rgba(28, 28, 30, 0.95);
+    --solid-fill: #3a3a3c;
+  }
+}
+
+.route-panel,
+.route-delete-panel,
+.ruler-panel,
+.point-editor {
+  background: var(--solid-panel-bg);
+}
+
+.panel-button,
+.route-row {
+  background: var(--solid-fill);
+}
+
+.route-row--selected {
+  background: var(--solid-panel-bg);
+}
+
+/* «Видалити Трасу N» — суцільна червона, як руйнівна дія в iOS. */
+.panel-button--danger:not(:disabled) {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+/* Короткі назви кнопок панелі — на iPhone. */
+.label-short {
+  display: none;
+}
+
+@media (max-width: 699px), (max-height: 500px) {
+  .label-full {
+    display: none;
+  }
+
+  .label-short {
+    display: inline;
+  }
+
+  /* Поки тягнуть точку, підказку видно біля джойстика — у панелі вона лише забирає місце сцени. */
+  .is-editing-point .route-panel .route-text {
+    display: none;
+  }
+}
+
+/* Джойстик і повзунок «підморгують»: тягнути наступну точку — ними. */
+@keyframes knob-wiggle-x {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  25% {
+    translate: -12px 0;
+  }
+  75% {
+    translate: 12px 0;
+  }
+}
+
+@keyframes knob-wiggle-y {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  25% {
+    translate: 0 -12px;
+  }
+  75% {
+    translate: 0 12px;
+  }
+}
+
+.stick--2d.stick--wiggle .stick-knob {
+  animation: knob-wiggle-x 0.5s ease-in-out 2;
+}
+
+.stick--vertical.stick--wiggle .stick-knob {
+  animation: knob-wiggle-y 0.5s ease-in-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stick--wiggle .stick-knob {
+    animation: none;
+  }
+}
+
+/* «Показати все» біля X/Y/Z — лише на iPhone вертикально, поки нижні кнопки сховані. */
+.view-button--all {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--tint);
+}
+
+.view-button--all svg {
+  width: 22px;
+  height: 22px;
+}
+
+@media (max-width: 699px) and (min-height: 501px) {
+  .is-editing-point .view-button--all {
+    display: inline-flex;
+  }
+
+  /* Список трас — до трьох рядків: вибрану трасу має бути видно на сцені. */
+  .route-list {
+    max-height: 184px;
+  }
+}
+
+/* iPhone горизонтально: список — колонкою на всю доступну висоту, кнопка внизу, без прокрутки в прокрутці. */
+@media (max-height: 500px) {
+  .route-delete-panel {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 2 * var(--gap) - 52px);
+    overflow: hidden;
+  }
+
+  .route-delete-panel .ruler-sub {
+    display: none;
+  }
+
+  .route-delete-panel .route-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    margin: 6px 0 8px;
+  }
+
+  .route-delete-panel .panel-button {
+    flex: none;
+  }
+
+  .route-actions .panel-button,
+  .route-panel .ruler-text,
+  .route-panel .ruler-sub {
+    font-size: 15px;
+  }
+
+  .route-panel {
+    max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 2 * var(--gap) - 52px);
   }
 }
