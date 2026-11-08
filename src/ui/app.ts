@@ -15,6 +15,7 @@ import {
 } from '../scene/scan-loader';
 import type { Viewer } from '../scene/viewer';
 import { createAlert, createProgress } from './dialogs';
+import { closedEditorState } from './point-editor';
 import { createRuler, type RulerState } from './ruler';
 import { createToolbar } from './toolbar';
 import { createViewBar } from './view-bar';
@@ -61,7 +62,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       phase: 'pickA',
       points: [],
       distanceMm: null,
-      editor: { active: false, label: null, point: null, origin: null, axis: null, moved: false },
+      editor: closedEditorState(),
     },
     error: null,
   };

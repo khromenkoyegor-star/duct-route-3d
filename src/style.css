@@ -1382,3 +1382,33 @@ body {
     top: calc(var(--safe-top) + var(--gap) + 44px + 8px);
   }
 }
+
+/* ───────── Етап 2: траса ───────── */
+
+:root {
+  /* Колір трас — системний indigo (не плутається з осями X/Y/Z і з рулеткою). */
+  --route: #5856d6;
+  --danger: #ff3b30;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --route: #5e5ce6;
+    --danger: #ff453a;
+  }
+}
+
+/* Відрізок уже йде по іншій осі — цей елемент керування зараз не рухає точку. */
+.stick--off {
+  opacity: 0.3;
+}
+
+.confirm-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.point-shift--warning {
+  color: var(--warning-label);
+  font-weight: 600;
+}

@@ -176,6 +176,21 @@ describe('джойстик між кадрами', () => {
     const step = c.update({ x: 1, y: 0 }, TOP, 5)!;
     expect(step.deltaMm).toBeCloseTo(NUDGE_MAX_MM_S * NUDGE_MAX_DT_S, 6);
   });
+
+  it('дозволена лише одна вісь (відрізок траси): тягнуть у бік Z — рух усе одно лише по X', () => {
+    const c = createStickController();
+    // Майже вертикально, з невеликим нахилом вправо: проєкція на стрілку X — додатна.
+    const step = c.update({ x: 0.5, y: 0.8 }, TOP, 0.1, 'X')!;
+    expect(c.axis).toBe('X');
+    expect(step.axis).toBe('X');
+    expect(step.deltaMm).toBeGreaterThan(0);
+    // Строго перпендикулярно до X — на місці.
+    expect(c.update({ x: 0, y: 0.9 }, TOP, 0.1, 'X')).toBeNull();
+    c.release();
+    // У мертвій зоні вісь не вибирається навіть з обмеженням.
+    expect(c.update({ x: 0.05, y: 0 }, TOP, 0.1, 'Z')).toBeNull();
+    expect(c.axis).toBeNull();
+  });
 });
 
 describe('повзунок Y', () => {
