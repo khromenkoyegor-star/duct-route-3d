@@ -95,11 +95,16 @@ export function createViewer(container: HTMLElement): Viewer {
   };
   controls.addEventListener('change', requestRender);
 
-  function resetView(): void {
-    // Відстань, з якої коло радіуса VIEW_RADIUS вміщується і по висоті, і по ширині кадру.
+  /** Кут огляду по меншій стороні кадру (рад): по висоті — горизонтально, по ширині — вертикально. */
+  function fitAngle(): number {
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const distance = VIEW_RADIUS / Math.sin(Math.min(vFov, hFov) / 2);
+    return Math.min(vFov, hFov);
+  }
+
+  function resetView(): void {
+    // Відстань, з якої коло радіуса VIEW_RADIUS вміщується і по висоті, і по ширині кадру.
+    const distance = VIEW_RADIUS / Math.sin(fitAngle() / 2);
     controls.target.copy(VIEW_TARGET);
     camera.position.copy(VIEW_TARGET).addScaledVector(VIEW_DIRECTION, distance);
     camera.lookAt(VIEW_TARGET);
@@ -116,10 +121,19 @@ export function createViewer(container: HTMLElement): Viewer {
     const firstLayout = lastWidth === 0;
     lastWidth = width;
     lastHeight = height;
+    const angleBefore = fitAngle();
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    if (firstLayout) resetView();
+    if (firstLayout) {
+      resetView();
+    } else {
+      // Поворот пристрою / зміна вікна: зберігаємо видимий масштаб по меншій стороні кадру,
+      // інакше сцена «стрибає» приблизно вдвічі. Напрямок погляду не змінюється.
+      const scale = Math.sin(angleBefore / 2) / Math.sin(fitAngle() / 2);
+      camera.position.sub(controls.target).multiplyScalar(scale).add(controls.target);
+      controls.update();
+    }
     requestRender();
   }
 

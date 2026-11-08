@@ -11,7 +11,7 @@ export interface SceneTheme {
 export const LIGHT_THEME: SceneTheme = {
   background: 0xf2f2f7, // systemGroupedBackground
   gridCenter: 0x8e8e93,
-  grid: 0xc7c7cc,
+  grid: 0xaeaeb2, // systemGray2 — помітніше на яскравому світлі
   axisX: 0xff3b30, // systemRed
   axisY: 0x34c759, // systemGreen
   axisZ: 0x007aff, // systemBlue
@@ -20,7 +20,7 @@ export const LIGHT_THEME: SceneTheme = {
 export const DARK_THEME: SceneTheme = {
   background: 0x000000,
   gridCenter: 0x8e8e93,
-  grid: 0x3a3a3c,
+  grid: 0x48484a, // systemGray3
   axisX: 0xff453a,
   axisY: 0x30d158,
   axisZ: 0x0a84ff,

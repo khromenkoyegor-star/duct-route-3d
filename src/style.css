@@ -164,7 +164,7 @@ body {
 
 .version-badge {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--label-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -187,6 +187,13 @@ body {
     calc(var(--safe-left) + 24px);
   font-size: 17px;
   text-align: center;
+}
+
+/* Вузький екран (iPhone вертикально, Slide Over): верхній край звільняємо під кнопки наступних етапів. */
+@media (max-width: 500px) {
+  .subtitle {
+    display: none;
+  }
 }
 
 /* Низький екран (iPhone горизонтально): компактні панелі, більше місця сцені. */
