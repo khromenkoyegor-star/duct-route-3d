@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+*.log
+.DS_Store
+
+# Скани користувача ніколи не потрапляють у репозиторій (тільки синтетичні фікстури в tests/fixtures/)
+*.glb
+*.gltf
+!tests/fixtures/*.glb
+!tests/fixtures/*.gltf

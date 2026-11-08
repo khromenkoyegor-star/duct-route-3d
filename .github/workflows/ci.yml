@@ -1,0 +1,82 @@
+# Збірка й тести на кожен PR; після злиття в main — ті самі тести і публікація на GitHub Pages.
+# Скріншоти iPad/iPhone і звіт Playwright — в артефакті «screenshots-and-report» кожного запуску.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# На PR новий push скасовує старий прогін; у main — ні, щоб не обірвати публікацію, яка вже йде.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Збірка і тести
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Залежності
+        run: npm ci
+
+      - name: Збірка (з перевіркою типів)
+        run: npm run build
+
+      - name: Тести ядра (Vitest)
+        run: npm test
+
+      - name: Браузер WebKit (рушій Safari)
+        run: npx playwright install --with-deps webkit
+
+      - name: Сценарії в браузері (Playwright, WebKit)
+        run: npm run test:e2e
+
+      - name: Скріншоти й звіт
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: screenshots-and-report
+          path: |
+            test-results/screenshots/
+            playwright-report/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Зібраний сайт для GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    name: Публікація на GitHub Pages
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Публікація
+        id: deployment
+        uses: actions/deploy-pages@v4
