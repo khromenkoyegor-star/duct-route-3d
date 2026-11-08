@@ -11,9 +11,10 @@ on:
 permissions:
   contents: read
 
+# На PR новий push скасовує старий прогін; у main — ні, щоб не обірвати публікацію, яка вже йде.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
