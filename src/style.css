@@ -794,3 +794,287 @@ body {
     display: block;
   }
 }
+
+/* ───────── Редактор точки: джойстик X/Z, повзунок Y, «Підтвердити точку» ───────── */
+
+.point-editor {
+  position: absolute;
+  left: calc(var(--safe-left) + var(--gap));
+  bottom: calc(var(--safe-bottom) + var(--gap));
+  z-index: 3;
+  max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--panel-bg);
+  border: 0.5px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+
+.point-readout {
+  margin-bottom: 10px;
+}
+
+.point-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.point-coords {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.point-shift {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.point-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.stick {
+  position: relative;
+  flex: none;
+  background: var(--fill);
+  border: 0.5px solid var(--panel-border);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.stick--2d {
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+}
+
+.stick--vertical {
+  width: 52px;
+  height: 128px;
+  border-radius: 26px;
+}
+
+.stick--active {
+  cursor: grabbing;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: var(--card-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  border: 0.5px solid var(--panel-border);
+  pointer-events: none;
+}
+
+.stick-knob--return {
+  transition: transform 0.15s ease-out;
+}
+
+.stick--active .stick-knob {
+  background: var(--tint);
+}
+
+.stick-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--axis-y);
+  pointer-events: none;
+}
+
+.stick-hint--up {
+  top: 4px;
+}
+
+.stick-hint--down {
+  bottom: 4px;
+}
+
+.confirm-button {
+  min-width: 120px;
+  min-height: 52px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--tint);
+  color: var(--tint-label);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.confirm-button:active {
+  opacity: 0.7;
+}
+
+/* Стрілки осей біля точки, яку доводять. */
+.axis-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.axis-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.axis-arrow line {
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.axis-arrow text {
+  font: 700 15px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
+}
+
+.axis-arrow--x line {
+  stroke: var(--axis-x);
+}
+
+.axis-arrow--x polygon,
+.axis-arrow--x text {
+  fill: var(--axis-x);
+}
+
+.axis-arrow--y line {
+  stroke: var(--axis-y);
+}
+
+.axis-arrow--y polygon,
+.axis-arrow--y text {
+  fill: var(--axis-y);
+}
+
+.axis-arrow--z line {
+  stroke: var(--axis-z);
+}
+
+.axis-arrow--z polygon,
+.axis-arrow--z text {
+  fill: var(--axis-z);
+}
+
+.axis-arrow--active line {
+  stroke-width: 6;
+}
+
+.axis-arrow--dim {
+  opacity: 0.3;
+}
+
+/* Маркери рулетки з літерами А/Б; точка, яку доводять, — пунктирна. */
+.ruler-marker-tag {
+  position: absolute;
+  left: 18px;
+  top: -20px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #000000;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.ruler-marker--draft {
+  border-style: dashed;
+}
+
+/* Поки точку доводять: легенда ховається (на її місці — джойстик). */
+.is-editing-point .legend-panel {
+  display: none;
+}
+
+/* iPhone вертикально: рулетка — зверху (замість інформації про скан), джойстик — над кнопками. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .is-ruler .title-panel {
+    display: none;
+  }
+
+  .is-ruler .ruler-panel {
+    top: calc(var(--safe-top) + var(--gap));
+    bottom: auto;
+  }
+
+  .point-editor {
+    right: calc(var(--safe-right) + var(--gap));
+    bottom: calc(var(--safe-bottom) + var(--gap) + var(--toolbar-h) + 8px);
+  }
+
+  .point-controls {
+    justify-content: space-between;
+  }
+
+  .confirm-button {
+    flex: 1 1 auto;
+  }
+}
+
+/* iPhone горизонтально: компактніше. */
+@media (max-height: 500px) {
+  .point-editor {
+    padding: 8px 10px;
+  }
+
+  .point-readout {
+    margin-bottom: 6px;
+  }
+
+  .point-title {
+    display: none;
+  }
+
+  .point-coords {
+    font-size: 13px;
+  }
+
+  .stick--2d {
+    width: 104px;
+    height: 104px;
+  }
+
+  .stick--vertical {
+    width: 48px;
+    height: 104px;
+  }
+
+  .stick-knob {
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+  }
+}

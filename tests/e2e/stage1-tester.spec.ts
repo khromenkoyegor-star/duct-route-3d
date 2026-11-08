@@ -273,6 +273,11 @@ async function tapWall(page: Page, point: Vec3, inward: Vec3, tap: (p: { x: numb
   await tap({ x: Math.round(p.x), y: Math.round(p.y) });
 }
 
+/** «Підтвердити точку» (після доведення точки рулетки). */
+async function confirmPoint(page: Page): Promise<void> {
+  await page.getByTestId('confirm-point').click();
+}
+
 function note(testInfo: TestInfo, text: string) {
   testInfo.annotations.push({ type: 'вимір', description: text });
   console.log(`[${testInfo.project.name}] ${text}`);
@@ -322,7 +327,9 @@ test.describe('Етап 1 (tester): важкий скан ≈ 38 МБ, 1 млн 
     await page.getByTestId('ruler').click();
     const click = (p: { x: number; y: number }) => page.mouse.click(p.x, p.y);
     await tapWall(page, [-2, 1.2, -0.5], [1, 0, 0], click);
+    await confirmPoint(page);
     await tapWall(page, [2, 1.2, -0.5], [-1, 0, 0], click);
+    await confirmPoint(page);
     await lookIntoRoom(page);
     const r = await state(page);
     expect(r.ruler.points).toHaveLength(2);
@@ -645,17 +652,23 @@ test.describe('Етап 1 (tester): рулетка', () => {
     const { errors } = await startRuler(page);
     const tap = (p: { x: number; y: number }) => page.touchscreen.tap(p.x, p.y);
     await tapWall(page, [-2, 1.0, -0.8], [1, 0, 0], tap);
+    await confirmPoint(page);
     await tapWall(page, [2, 1.0, -0.8], [-1, 0, 0], tap);
+    await confirmPoint(page);
     const across = (await state(page)).ruler;
     expect(across.points).toHaveLength(2);
     expect(Math.abs(across.distanceMm - 4000)).toBeLessThanOrEqual(1);
     await tapWall(page, [-1.2, 1.0, -1.5], [0, 0, 1], tap);
+    await confirmPoint(page);
     await tapWall(page, [-1.2, 1.0, 1.5], [0, 0, -1], tap);
+    await confirmPoint(page);
     const depth = (await state(page)).ruler;
     expect(depth.points).toHaveLength(2);
     expect(Math.abs(depth.distanceMm - 3000)).toBeLessThanOrEqual(1);
     await tapWall(page, [0.7, 0, 0.4], [0, 1, 0], tap);
+    await confirmPoint(page);
     await tapWall(page, [0.7, 2.7, 0.4], [0, -1, 0], tap);
+    await confirmPoint(page);
     const height = (await state(page)).ruler;
     expect(Math.abs(height.distanceMm - 2700)).toBeLessThanOrEqual(1);
     expect(errors).toEqual([]);
@@ -670,6 +683,7 @@ test.describe('Етап 1 (tester): рулетка', () => {
     ]) {
       const sp = await project(page, p);
       await page.mouse.click(Math.round(sp.x), Math.round(sp.y));
+      await confirmPoint(page);
     }
     const r = (await state(page)).ruler;
     expect(r.points).toHaveLength(2);
@@ -741,7 +755,9 @@ test.describe('Етап 1 (tester): рулетка', () => {
     await startRuler(page);
     const click = (p: { x: number; y: number }) => page.mouse.click(p.x, p.y);
     await tapWall(page, [-2, 1.2, 0], [1, 0, 0], click);
+    await confirmPoint(page);
     await tapWall(page, [2, 1.2, 0], [-1, 0, 0], click);
+    await confirmPoint(page);
     await lookIntoRoom(page);
     const before = (await state(page)).ruler;
     expect(Math.abs(before.distanceMm - 4000)).toBeLessThanOrEqual(1);

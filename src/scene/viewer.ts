@@ -58,6 +58,11 @@ export interface Viewer {
   projectAxes(): Record<'origin' | AxisName, ScreenPoint>;
   /** Точка сцени (м) → екран (CSS px); visible = перед камерою. */
   projectPoint(point: Vec3Like): ScreenPoint & { visible: boolean };
+  /**
+   * Куди на екрані дивляться осі +X, +Y, +Z біля точки (вектори в CSS px; довжина — для 1/10
+   * відстані до камери). Нульовий вектор — вісь за камерою. Для джойстика і стрілок осей.
+   */
+  screenAxes(point: Vec3Like): Record<'X' | 'Y' | 'Z', ScreenPoint>;
   /** Показати скан (null — прибрати). Звільнення пам'яті — справа того, хто завантажив. */
   setScan(root: Object3D | null): void;
   /** Межі скану в метрах або null, якщо скану немає. */
@@ -68,6 +73,8 @@ export interface Viewer {
   raycastScan(clientX: number, clientY: number): Vector3 | null;
   /** Поставити камеру: звідки й куди дивитися (м). */
   setView(position: Vec3Like, target: Vec3Like): void;
+  /** Зсунути камеру (без повороту й зміни відстані) так, щоб точка була в центрі кадру. */
+  centerOn(point: Vec3Like): void;
   /** Запам'ятати положення камери (наприклад, у момент натискання). */
   snapshotView(): ViewSnapshot;
   /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
@@ -310,6 +317,16 @@ export function createViewer(container: HTMLElement): Viewer {
       };
     },
     projectPoint,
+    screenAxes(point) {
+      const base = new Vector3(point.x, point.y, point.z);
+      const length = Math.max(camera.position.distanceTo(base) * 0.1, 0.001);
+      const origin = projectPoint(base);
+      const along = (dx: number, dy: number, dz: number): ScreenPoint => {
+        const tip = projectPoint({ x: base.x + dx * length, y: base.y + dy * length, z: base.z + dz * length });
+        return tip.visible && origin.visible ? { x: tip.x - origin.x, y: tip.y - origin.y } : { x: 0, y: 0 };
+      };
+      return { X: along(1, 0, 0), Y: along(0, 1, 0), Z: along(0, 0, 1) };
+    },
     setScan(root) {
       scanGroup.clear();
       cachedScanBox = null;
@@ -342,6 +359,14 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.target.copy(snapshot.target);
       camera.position.copy(snapshot.position);
       camera.lookAt(controls.target);
+      controls.update();
+      requestRender();
+    },
+    centerOn(point) {
+      flushInertia();
+      const offset = camera.position.clone().sub(controls.target);
+      controls.target.set(point.x, point.y, point.z);
+      camera.position.copy(controls.target).add(offset);
       controls.update();
       requestRender();
     },

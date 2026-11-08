@@ -1,21 +1,32 @@
 /**
- * «Рулетка»: два короткі дотики по скану → відстань між точками в мм.
- * Перетягування, як завжди, обертає камеру й точку не ставить (див. tap.ts).
- * Точка береться там, де натиснули, а камера повертається в положення на момент натискання —
- * тремтіння пальця чи мишки не зсуває ні камеру, ні точку.
- * Наступний дотик після виміру починає новий вимір.
+ * «Рулетка»: точка А → доведення → «Підтвердити точку» → точка Б → доведення → «Підтвердити точку»
+ * → відстань у мм.
+ *
+ * - Короткий дотик по скану ставить точку («прилипає» до поверхні). Перетягування обертає камеру
+ *   й точку не ставить (tap.ts). Точка береться там, де натиснули; тремтіння не зсуває ні камеру, ні точку.
+ * - Поки точка не підтверджена, її доводять редактором точки (джойстик X/Z, повзунок Y),
+ *   а новий дотик по скану просто переставляє її.
+ * - Після виміру наступний дотик починає новий вимір; «Готово» — вихід.
  */
-import type { Vector3 } from 'three';
+import { Vector3 } from 'three';
+import type { PointM } from '../core/nudge';
 import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
+import { createPointEditor, type PointEditorState } from './point-editor';
 import { onTap } from './tap';
+
+/** pickA — чекаємо точку А; editA — доводимо А; pickB / editB — так само Б; done — є результат. */
+export type RulerPhase = 'pickA' | 'editA' | 'pickB' | 'editB' | 'done';
 
 export interface RulerState {
   active: boolean;
-  /** Точки виміру в метрах сцени. */
-  points: Array<{ x: number; y: number; z: number }>;
+  phase: RulerPhase;
+  /** Точки виміру в метрах сцени (А, потім Б). */
+  points: PointM[];
   /** Відстань у мм або null, поки точок менше двох. */
   distanceMm: number | null;
+  /** Стан редактора точки (для тестів і підказок). */
+  editor: PointEditorState;
 }
 
 export interface Ruler {
@@ -23,6 +34,10 @@ export interface Ruler {
   panel: HTMLElement;
   /** Шар з лінією, маркерами точок і підписом відстані. */
   overlay: HTMLElement;
+  /** Редактор точки: джойстик, повзунок, «Підтвердити точку». */
+  editor: HTMLElement;
+  /** Стрілки осей біля точки, яку доводять. */
+  editorOverlay: HTMLElement;
   readonly state: RulerState;
   setActive(active: boolean): void;
   /** Скинути точки (наприклад, відкрили інший скан). */
@@ -30,16 +45,21 @@ export interface Ruler {
   dispose(): void;
 }
 
-const HINT_FIRST = 'Торкніться першої точки на скані';
-const HINT_SECOND = 'Тепер — другої точки';
-const HINT_NEXT = 'Торкніться скану, щоб почати новий вимір';
+const HINTS: Record<RulerPhase, string> = {
+  pickA: 'Торкніться першої точки (А) на скані',
+  editA: 'Точка А: підсуньте, якщо треба, і натисніть «Підтвердити точку»',
+  pickB: 'Тепер торкніться другої точки (Б)',
+  editB: 'Точка Б: підсуньте, якщо треба, і натисніть «Підтвердити точку»',
+  done: 'Торкніться скану, щоб почати новий вимір',
+};
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
+const LABELS = ['А', 'Б'] as const;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export function createRuler(
   viewer: Viewer,
-  handlers: { onChange?(state: RulerState): void; onDone?(): void } = {},
+  handlers: { onChange?(state: RulerState): void; onDone?(): void; onEditingChange?(editing: boolean): void } = {},
 ): Ruler {
   const panel = document.createElement('div');
   panel.className = 'panel ruler-panel';
@@ -78,10 +98,14 @@ export function createRuler(
   line.setAttribute('class', 'ruler-line');
   svg.append(halo, line);
   overlay.append(svg);
-  const markers = [0, 1].map(() => {
+  const markers = LABELS.map((letter) => {
     const marker = document.createElement('div');
     marker.className = 'ruler-marker';
     marker.hidden = true;
+    const tag = document.createElement('span');
+    tag.className = 'ruler-marker-tag';
+    tag.textContent = letter;
+    marker.append(tag);
     overlay.append(marker);
     return marker;
   });
@@ -91,15 +115,39 @@ export function createRuler(
   overlay.append(label);
 
   let active = false;
+  let phase: RulerPhase = 'pickA';
   let points: Vector3[] = [];
+  let missed = false;
   let downView: ViewSnapshot | null = null;
+
+  const editingIndex = () => (phase === 'editA' ? 0 : phase === 'editB' ? 1 : -1);
+
+  const editor = createPointEditor(viewer, {
+    onChange(point) {
+      const i = editingIndex();
+      if (i < 0) return;
+      points[i] = new Vector3(point.x, point.y, point.z);
+      render();
+    },
+    onConfirm(point) {
+      const i = editingIndex();
+      if (i < 0) return;
+      points[i] = new Vector3(point.x, point.y, point.z);
+      phase = i === 0 ? 'pickB' : 'done';
+      editor.close();
+      handlers.onEditingChange?.(false);
+      render();
+    },
+  });
 
   const state = (): RulerState => {
     const [a, b] = points;
     return {
       active,
+      phase,
       points: points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
       distanceMm: a && b ? mToMm(a.distanceTo(b)) : null,
+      editor: editor.state,
     };
   };
 
@@ -121,6 +169,8 @@ export function createRuler(
     const [a, b] = points;
     const sa = place(markers[0]!, a);
     const sb = place(markers[1]!, b);
+    const i = editingIndex();
+    markers.forEach((m, k) => m.classList.toggle('ruler-marker--draft', k === i));
     const lineVisible = !!(sa?.visible && sb?.visible);
     svg.style.display = lineVisible ? '' : 'none';
     if (sa && sb && lineVisible) {
@@ -136,23 +186,49 @@ export function createRuler(
   };
   const stopFrames = viewer.onFrame(updateOverlay);
 
-  const render = (missed = false) => {
+  function render(): void {
     const current = state();
     panel.hidden = !active;
-    text.classList.toggle('ruler-text--result', current.distanceMm !== null);
-    if (current.distanceMm !== null) {
-      const value = formatMm(current.distanceMm);
+    const hasDistance = current.distanceMm !== null;
+    text.classList.toggle('ruler-text--result', hasDistance);
+    if (hasDistance) {
+      const value = formatMm(current.distanceMm!);
       text.textContent = value;
       label.textContent = value;
     } else {
-      text.textContent = points.length === 0 ? HINT_FIRST : HINT_SECOND;
+      text.textContent = HINTS[phase];
     }
-    sub.textContent = missed ? HINT_MISS : current.distanceMm !== null ? HINT_NEXT : '';
+    // Другий рядок: промах — попередження; інакше підказка, якщо головний рядок зайнятий числом.
+    sub.textContent = missed ? HINT_MISS : hasDistance ? HINTS[phase] : '';
     sub.hidden = sub.textContent === '';
     sub.classList.toggle('ruler-sub--warning', missed);
     viewer.requestRender();
     updateOverlay();
     handlers.onChange?.(current);
+  }
+
+  /** Якщо точку закрила панель джойстика (iPhone) або вона за краєм — зсунути камеру до неї. */
+  const keepVisible = (world: Vector3) => {
+    const screen = viewer.projectPoint(world);
+    const rect = editor.element.getBoundingClientRect();
+    const margin = 24;
+    const covered =
+      rect.width > 0 &&
+      screen.x > rect.left - margin &&
+      screen.x < rect.right + margin &&
+      screen.y > rect.top - margin &&
+      screen.y < rect.bottom + margin;
+    const outside =
+      !screen.visible || screen.x < 0 || screen.y < 0 || screen.x > window.innerWidth || screen.y > window.innerHeight;
+    if (covered || outside) viewer.centerOn(world);
+  };
+
+  const startEditing = (index: 0 | 1, hit: Vector3) => {
+    points = index === 0 ? [hit] : [points[0]!, hit];
+    phase = index === 0 ? 'editA' : 'editB';
+    editor.edit({ x: hit.x, y: hit.y, z: hit.z }, LABELS[index]);
+    handlers.onEditingChange?.(true);
+    keepVisible(hit);
   };
 
   const stopTap = onTap(viewer.canvas, {
@@ -164,35 +240,48 @@ export function createRuler(
       // Скасувати мікроповорот камери від тремтіння — шукаємо точку в тому кадрі, куди цілились.
       if (downView) viewer.restoreView(downView);
       const hit = viewer.raycastScan(x, y);
-      if (!hit) {
-        render(true);
-        return;
+      missed = !hit;
+      if (hit) {
+        // А (або новий вимір) — у фазах pickA/editA/done; Б — у pickB/editB.
+        startEditing(phase === 'pickB' || phase === 'editB' ? 1 : 0, hit);
       }
-      points = points.length >= 2 ? [hit] : [...points, hit];
       render();
     },
   });
+
+  const reset = () => {
+    points = [];
+    phase = 'pickA';
+    missed = false;
+    if (editor.state.active) {
+      editor.close();
+      handlers.onEditingChange?.(false);
+    }
+  };
 
   render();
 
   return {
     panel,
     overlay,
+    editor: editor.element,
+    editorOverlay: editor.overlay,
     get state() {
       return state();
     },
     setActive(value) {
       active = value;
-      if (!active) points = [];
+      if (!active) reset();
       render();
     },
     clear() {
-      points = [];
+      reset();
       render();
     },
     dispose() {
       stopTap();
       stopFrames();
+      editor.dispose();
       panel.remove();
       overlay.remove();
     },
