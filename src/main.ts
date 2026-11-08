@@ -17,6 +17,9 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
 }
 
+// Safari на iPhone показує підсвітку натискання (:active) лише якщо є хоч один слухач touchstart.
+document.addEventListener('touchstart', () => {}, { passive: true });
+
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('Немає елемента #app');
 

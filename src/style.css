@@ -1326,3 +1326,59 @@ body {
     top: calc(var(--safe-top) + var(--gap) + 52px + 8px);
   }
 }
+
+/* ───────── Кнопки видів: правки за UX-рецензією ───────── */
+
+.view-area {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--gap));
+  left: calc(var(--safe-left) + var(--gap));
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* Блок кнопок — тієї ж висоти, що й кнопки праворуч (44 px). */
+.view-bar {
+  position: static;
+  padding: 0;
+  gap: 0;
+  pointer-events: auto;
+}
+
+.view-button {
+  border-radius: 13px;
+}
+
+.view-button--active {
+  background: var(--fill);
+  box-shadow: inset 0 -3px 0 currentColor;
+}
+
+.view-toast {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--panel-bg);
+  border: 0.5px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stick-guide--depth {
+  opacity: 0.4;
+}
+
+/* iPhone вертикально: панель рулетки — під кнопками видів (44 px). */
+@media (max-width: 699px) and (min-height: 501px) {
+  .is-ruler .ruler-panel {
+    top: calc(var(--safe-top) + var(--gap) + 44px + 8px);
+  }
+}

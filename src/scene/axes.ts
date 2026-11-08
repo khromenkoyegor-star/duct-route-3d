@@ -19,7 +19,9 @@ const SHAFT_RADIUS_MM = 6;
 const HEAD_RADIUS_MM = 18;
 const HEAD_LENGTH_MM = 60;
 const LABEL_GAP_MM = 90;
-/** Підписи X/Y/Z — сталого розміру на екрані (≈ 18 px), незалежно від відстані. */
+/** Підписи X/Y/Z — сталого розміру на екрані, незалежно від відстані й висоти екрана. */
+const LABEL_PX = 18;
+/** Початковий масштаб підпису (до першого setScreen). */
 const LABEL_SCREEN_SCALE = 0.02;
 /** Напівпрозорі — видно, але не заважають. */
 export const AXES_OPACITY = 0.6;
@@ -40,6 +42,8 @@ export interface Axes {
   /** Точка, де стоїть підпис осі (у метрах сцени) — для тестів і майбутніх підказок. */
   labelPosition(name: AxisName): Vector3;
   setTheme(theme: SceneTheme): void;
+  /** Висота кадру (px) і кут огляду камери (°) — щоб підписи були ≈ 18 px на будь-якому екрані. */
+  setScreen(heightPx: number, fovDeg: number): void;
   dispose(): void;
 }
 
@@ -134,6 +138,11 @@ export function createAxes(theme: SceneTheme): Axes {
     labelPosition(name) {
       const part = parts.find((p) => p.name === name);
       return part ? part.label.getWorldPosition(new Vector3()) : new Vector3();
+    },
+    setScreen(heightPx, fovDeg) {
+      // Спрайт без зменшення з відстанню: висота на екрані = scale · H / (2 · tan(fov/2)).
+      const scale = (LABEL_PX * 2 * Math.tan((fovDeg * Math.PI) / 360)) / Math.max(1, heightPx);
+      for (const part of parts) part.label.scale.set(scale, scale, 1);
     },
     setTheme(next) {
       for (const part of parts) {

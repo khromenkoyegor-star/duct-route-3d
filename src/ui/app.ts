@@ -77,8 +77,15 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   // Кнопки видів X/Y/Z. Якщо зараз доводять точку — дивимось саме на неї.
   const viewBar = createViewBar((axis) => {
     const editing = ruler.state.editor;
-    viewer.viewAlong(axis, editing.active && editing.point ? editing.point : undefined);
+    // Доводять точку — дивимось на неї, і вона стає посередині вільної від панелей частини екрана.
+    const side =
+      editing.active && editing.point
+        ? viewer.viewAlong(axis, editing.point, ruler.freeAreaCenter() ?? undefined)
+        : viewer.viewAlong(axis);
+    viewBar.setActive(axis, side);
   });
+  // Камеру повернули рукою — вид уже не «строго вздовж осі».
+  viewer.onUserCamera(() => viewBar.setActive(null));
   const progress = createProgress();
   const alert = createAlert();
 
@@ -170,7 +177,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       state.scanInfo = info;
       state.status = 'ready';
       // Скан завеликий для пристрою — одне віконце одразу після відкриття.
-      if (info.risks.length > 0) alert.show('Увага: важкий скан', info.risks.join('\n'));
+      if (info.risks.length > 0) alert.show('Увага', info.risks.join('\n'));
       toolbar.setScanLoaded(true);
     } catch (error) {
       console.error(error);
