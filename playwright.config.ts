@@ -46,7 +46,8 @@ export default defineConfig({
   ],
   webServer: {
     // Перевіряємо саме зібрану версію — таку, як на GitHub Pages.
-    command: 'npm run build && npm run preview',
+    // У CI збірка вже зроблена попереднім кроком — і саме вона піде на Pages.
+    command: CI ? 'npm run preview' : 'npm run build && npm run preview',
     url: `http://localhost:${PORT}${BASE_PATH}`,
     reuseExistingServer: !CI,
     timeout: 120_000,
