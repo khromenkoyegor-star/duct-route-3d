@@ -39,6 +39,8 @@ export interface Ruler {
   /** Стрілки осей біля точки, яку доводять. */
   editorOverlay: HTMLElement;
   readonly state: RulerState;
+  /** Щойно підтвердили точку (захист від подвійного натискання). */
+  recentlyConfirmed(): boolean;
   setActive(active: boolean): void;
   /** Скинути точки (наприклад, відкрили інший скан). */
   clear(): void;
@@ -57,6 +59,11 @@ const HINT_CONFIRM_MOVE = 'Точку вже підсунуто. Торкніт�
 /** Повторний дотик для перенесення підсунутої точки: не пізніше й не далі за це. */
 const MOVE_CONFIRM_MS = 4000;
 const MOVE_CONFIRM_PX = 40;
+/**
+ * Після «Підтвердити точку» редактор зникає, і другий дотик подвійного натискання впав би
+ * на те, що під кнопкою (скан чи кнопку «Рулетка»). Цей час такі дотики ігноруються.
+ */
+export const CONFIRM_COOLDOWN_MS = 350;
 const LABELS = ['А', 'Б'] as const;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -125,6 +132,14 @@ export function createRuler(
   let missed = false;
   /** Перший дотик для перенесення вже підсунутої точки (чекаємо другий у тому самому місці). */
   let pendingMove: { x: number; y: number; time: number } | null = null;
+  let pendingTimer = 0;
+  let confirmedAt = -Infinity;
+  const recentlyConfirmed = () => performance.now() - confirmedAt < CONFIRM_COOLDOWN_MS;
+  const clearPending = () => {
+    pendingMove = null;
+    if (pendingTimer) window.clearTimeout(pendingTimer);
+    pendingTimer = 0;
+  };
   let downView: ViewSnapshot | null = null;
 
   const editingIndex = () => (phase === 'editA' ? 0 : phase === 'editB' ? 1 : -1);
@@ -141,13 +156,15 @@ export function createRuler(
       if (i < 0) return;
       points[i] = new Vector3(point.x, point.y, point.z);
       phase = i === 0 ? 'pickB' : 'done';
-      pendingMove = null;
+      clearPending();
+      confirmedAt = performance.now();
       editor.close();
       handlers.onEditingChange?.(false);
       render();
     },
     onSettle(point) {
       keepVisible(new Vector3(point.x, point.y, point.z));
+      render();
     },
   });
 
@@ -272,7 +289,7 @@ export function createRuler(
       downView = active ? viewer.snapshotView() : null;
     },
     onTap: (x, y) => {
-      if (!active) return;
+      if (!active || recentlyConfirmed()) return;
       // Скасувати мікроповорот камери від тремтіння — шукаємо точку в тому кадрі, куди цілились.
       if (downView) viewer.restoreView(downView);
       const hit = viewer.raycastScan(x, y);
@@ -285,12 +302,19 @@ export function createRuler(
           const confirmed =
             pendingMove && now - pendingMove.time < MOVE_CONFIRM_MS && Math.hypot(x - pendingMove.x, y - pendingMove.y) < MOVE_CONFIRM_PX;
           if (!confirmed) {
+            clearPending();
             pendingMove = { x, y, time: now };
+            // Підказка зникає, коли спливає час на повторний дотик.
+            pendingTimer = window.setTimeout(() => {
+              pendingMove = null;
+              pendingTimer = 0;
+              render();
+            }, MOVE_CONFIRM_MS);
             render();
             return;
           }
         }
-        pendingMove = null;
+        clearPending();
         // А (або новий вимір) — у фазах pickA/editA/done; Б — у pickB/editB.
         startEditing(phase === 'pickB' || phase === 'editB' ? 1 : 0, hit);
       }
@@ -302,7 +326,7 @@ export function createRuler(
     points = [];
     phase = 'pickA';
     missed = false;
-    pendingMove = null;
+    clearPending();
     if (editor.state.active) {
       editor.close();
       handlers.onEditingChange?.(false);
@@ -319,6 +343,7 @@ export function createRuler(
     get state() {
       return state();
     },
+    recentlyConfirmed,
     setActive(value) {
       active = value;
       if (!active) reset();
@@ -329,6 +354,7 @@ export function createRuler(
       render();
     },
     dispose() {
+      clearPending();
       stopTap();
       stopFrames();
       editor.dispose();

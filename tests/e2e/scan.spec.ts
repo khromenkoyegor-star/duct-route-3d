@@ -45,6 +45,8 @@ async function lookIntoRoom(page: Page): Promise<void> {
 /** Натиснути «Підтвердити точку». */
 async function confirmPoint(page: Page): Promise<void> {
   await page.getByTestId('confirm-point').click();
+  // Після підтвердження ~0,35 с дотики ігноруються (захист від подвійного натискання).
+  await page.waitForTimeout(400);
 }
 
 const project = (page: Page, p: { x: number; y: number; z: number }) =>

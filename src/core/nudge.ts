@@ -57,32 +57,66 @@ const unit = (v: Vec2): Vec2 => {
   return l > 0 ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 };
 };
 
+/** Як розкладено осі на джойстику (для «запасу» під час утримання). */
+export interface AxisLayout {
+  /** Довша на екрані вісь — лишається як на екрані. */
+  strong: HorizontalAxis;
+  /** Чи коротшу вісь розведено перпендикулярно. */
+  separated: boolean;
+}
+
+/** Запас, щоб розкладка не «стрибала» від дрібних змін перспективи під час утримання. */
+const STRONG_KEEP_RATIO = 0.7;
+const SEPARATE_ON = (25 * Math.PI) / 180;
+const SEPARATE_OFF = (45 * Math.PI) / 180;
+
 /**
- * Напрямки X і Z на джойстику (одиничні, екранні: y вниз).
+ * Напрямки X і Z на джойстику (одиничні, екранні: y вниз) і їхня розкладка.
  * Зазвичай — так, як стрілки X і Z біля точки на екрані. Але якщо на екрані вони майже на одній
  * лінії (дивимось з кута на рівні очей) або одна з осей «дивиться в камеру», розрізнити їх неможливо.
  * Тоді довша лишається як є, а коротша отримує перпендикулярний напрямок (у бік її справжньої стрілки),
  * і джойстик показує це своїми стрілками — обидві осі завжди досяжні.
+ * `previous` — розкладка з попереднього кадру утримання: її змінюємо лише з запасом.
  */
-export function joystickDirections(screen: Record<HorizontalAxis, Vec2>): Record<HorizontalAxis, Vec2> {
+export function joystickLayout(
+  screen: Record<HorizontalAxis, Vec2>,
+  previous?: AxisLayout | null,
+): { dirs: Record<HorizontalAxis, Vec2>; layout: AxisLayout } {
   const lx = length(screen.X);
   const lz = length(screen.Z);
-  if (!(Math.max(lx, lz) > 0)) return { X: { x: 1, y: 0 }, Z: { x: 0, y: -1 } };
-  const strong: HorizontalAxis = lx >= lz ? 'X' : 'Z';
+  if (!(Math.max(lx, lz) > 0) || !Number.isFinite(lx) || !Number.isFinite(lz)) {
+    return { dirs: { X: { x: 1, y: 0 }, Z: { x: 0, y: -1 } }, layout: previous ?? { strong: 'X', separated: true } };
+  }
+  const lengths: Record<HorizontalAxis, number> = { X: lx, Z: lz };
+  let strong: HorizontalAxis = lx >= lz ? 'X' : 'Z';
+  if (previous) {
+    const other = previous.strong === 'X' ? 'Z' : 'X';
+    if (lengths[previous.strong] >= lengths[other] * STRONG_KEEP_RATIO) strong = previous.strong;
+  }
   const weak: HorizontalAxis = strong === 'X' ? 'Z' : 'X';
   const s = unit(screen[strong]);
   const w = unit(screen[weak]);
-  const degenerate = length(screen[weak]) < length(screen[strong]) * DEGENERATE_AXIS_RATIO;
+  const degenerate = lengths[weak] < lengths[strong] * DEGENERATE_AXIS_RATIO;
   // Кут між лініями осей (0…90°): напрямок «туди чи назад» не важливий.
   const separation = Math.acos(Math.min(1, Math.abs(s.x * w.x + s.y * w.y)));
-  if (!degenerate && separation >= MIN_AXIS_SEPARATION) {
-    return strong === 'X' ? { X: s, Z: w } : { X: w, Z: s };
+  let separated: boolean;
+  if (previous && previous.strong === strong) {
+    separated = previous.separated ? degenerate || separation < SEPARATE_OFF : degenerate || separation < SEPARATE_ON;
+  } else {
+    separated = degenerate || separation < MIN_AXIS_SEPARATION;
   }
+  const layout: AxisLayout = { strong, separated };
+  if (!separated) return { dirs: strong === 'X' ? { X: s, Z: w } : { X: w, Z: s }, layout };
   let perp: Vec2 = { x: -s.y, y: s.x };
   const dot = perp.x * w.x + perp.y * w.y;
   // У бік справжньої стрілки коротшої осі; якщо вона майже точка — «вгору» на екрані.
   if (dot < 0 || (Math.abs(dot) < 1e-6 && perp.y > 0)) perp = { x: -perp.x, y: -perp.y };
-  return strong === 'X' ? { X: s, Z: perp } : { X: perp, Z: s };
+  return { dirs: strong === 'X' ? { X: s, Z: perp } : { X: perp, Z: s }, layout };
+}
+
+/** Напрямки X і Z на джойстику без попередньої розкладки (див. joystickLayout). */
+export function joystickDirections(screen: Record<HorizontalAxis, Vec2>): Record<HorizontalAxis, Vec2> {
+  return joystickLayout(screen).dirs;
 }
 
 /**
@@ -117,7 +151,14 @@ export function axisVelocity(stick: Vec2, axisOnScreen: Vec2): number {
 
 /** Повзунок Y: значення −1…1 (вгору — додатне) → швидкість по Y у мм/с. */
 export function sliderVelocity(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.sign(value) * nudgeSpeed(value);
+}
+
+/** Крок часу кадру (с): лише скінченний, не від'ємний і не довший за NUDGE_MAX_DT_S. */
+function safeDt(dtS: number): number {
+  if (Number.isNaN(dtS)) return 0;
+  return Math.min(Math.max(dtS, 0), NUDGE_MAX_DT_S);
 }
 
 /** Зсунути точку (м) на deltaMm лише по одній осі — дві інші координати лишаються рівно як були. */
@@ -141,6 +182,11 @@ export interface NudgeStep {
  */
 export interface StickController {
   readonly axis: HorizontalAxis | null;
+  /**
+   * Напрямки осей на джойстику під час утримання (null — не тримають). Розкладка змінюється
+   * лише з запасом — зафіксована вісь не «перескакує» від дрібних змін перспективи.
+   */
+  readonly dirs: Record<HorizontalAxis, Vec2> | null;
   /** Один кадр: джойстик, напрямки осей на екрані біля точки, час кадру (с) → крок або null. */
   update(stick: Vec2, screen: Record<HorizontalAxis, Vec2>, dtS: number): NudgeStep | null;
   release(): void;
@@ -148,21 +194,34 @@ export interface StickController {
 
 export function createStickController(): StickController {
   let axis: HorizontalAxis | null = null;
+  let layout: AxisLayout | null = null;
+  let dirs: Record<HorizontalAxis, Vec2> | null = null;
   return {
     get axis() {
       return axis;
     },
+    get dirs() {
+      return dirs;
+    },
     update(stick, screen, dtS) {
-      const dirs = joystickDirections(screen);
-      if (!axis) axis = pickAxis(stick, dirs);
-      if (!axis) return null;
+      if (!Number.isFinite(stick.x) || !Number.isFinite(stick.y)) return null;
+      // Напрямки стежать за камерою, але розкладка змінюється лише з запасом.
+      const next = joystickLayout(screen, layout);
+      if (!axis) {
+        axis = pickAxis(stick, next.dirs);
+        if (!axis) return null;
+      }
+      layout = next.layout;
+      dirs = next.dirs;
       const velocity = axisVelocity(stick, dirs[axis]);
-      const dt = Math.min(Math.max(dtS, 0), NUDGE_MAX_DT_S);
+      const dt = safeDt(dtS);
       if (velocity === 0 || dt === 0) return null;
       return { axis, deltaMm: velocity * dt };
     },
     release() {
       axis = null;
+      layout = null;
+      dirs = null;
     },
   };
 }
@@ -170,7 +229,7 @@ export function createStickController(): StickController {
 /** Один кадр повзунка Y. */
 export function sliderStep(value: number, dtS: number): NudgeStep | null {
   const velocity = sliderVelocity(value);
-  const dt = Math.min(Math.max(dtS, 0), NUDGE_MAX_DT_S);
+  const dt = safeDt(dtS);
   if (velocity === 0 || dt === 0) return null;
   return { axis: 'Y', deltaMm: velocity * dt };
 }

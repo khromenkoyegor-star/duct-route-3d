@@ -337,6 +337,10 @@ function collectStats(root: Object3D, fileBytes: number, texturesReduced: number
 function placeBottomAtZero(content: Group): { wrapper: Group; offsetY: number } {
   content.updateMatrixWorld(true);
   const box = new Box3().setFromObject(content, true);
+  const bad = [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z].some((v) => Number.isNaN(v));
+  if (bad) {
+    throw new ScanLoadError('Файл моделі пошкоджений: у ньому є неправильні координати точок. Експортуйте скан з Polycam ще раз.');
+  }
   const offsetY = box.isEmpty() ? 0 : -box.min.y;
   const wrapper = new Group();
   wrapper.name = 'scan';

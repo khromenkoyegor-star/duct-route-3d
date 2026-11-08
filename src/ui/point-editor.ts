@@ -111,40 +111,52 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   const controller = createStickController();
 
   // Цикл анімації працює лише поки джойстик чи повзунок утримують.
+  // Рух рахується за реальним часом (performance.now), а не за кількістю кадрів:
+  // якщо браузер малює рідко, точка все одно проходить стільки, скільки тримали.
   let frame = 0;
   let lastTime = 0;
-  const loop = (time: number) => {
-    const dt = lastTime ? (time - lastTime) / MS_PER_SECOND : 0;
-    lastTime = time;
-    if (point) {
-      let step = null;
-      if (stick.active) {
-        const screen = viewer.screenAxes(point);
-        step = controller.update(stick.value, { X: screen.X, Z: screen.Z }, dt);
-        axis = controller.axis;
-        stick.setKnobAxis(axis);
-      } else if (slider.active) {
-        step = sliderStep(-slider.value.y, dt);
-        axis = step ? 'Y' : axis;
-        slider.setKnobAxis(axis === 'Y' ? 'Y' : null);
-      }
+  const integrate = (now: number) => {
+    const dt = lastTime ? (now - lastTime) / MS_PER_SECOND : 0;
+    lastTime = now;
+    if (!point) return;
+    let changed = false;
+    if (stick.active) {
+      const screen = viewer.screenAxes(point);
+      const step = controller.update(stick.value, { X: screen.X, Z: screen.Z }, dt);
+      axis = controller.axis;
+      stick.setKnobAxis(axis);
       if (step) {
         point = movePoint(point, step.axis, step.deltaMm);
-        handlers.onChange(point);
-        viewer.requestRender();
+        changed = true;
       }
-      render();
+    } else if (slider.active) {
+      // Одночасно — лише одна вісь: джойстик має перевагу, повзунок — коли джойстик вільний.
+      const step = sliderStep(-slider.value.y, dt);
+      if (step) {
+        axis = 'Y';
+        slider.setKnobAxis('Y');
+        point = movePoint(point, step.axis, step.deltaMm);
+        changed = true;
+      }
     }
+    if (changed) {
+      handlers.onChange(point);
+      viewer.requestRender();
+    }
+    render();
+  };
+  const loop = () => {
+    integrate(performance.now());
     if (stick.active || slider.active) frame = requestAnimationFrame(loop);
     else stopLoop();
   };
   const startLoop = () => {
     if (frame) return;
-    lastTime = 0;
+    lastTime = performance.now();
     frame = requestAnimationFrame(loop);
   };
-  const stopLoop = () => {
-    const wasRunning = frame !== 0;
+  const stopLoop = (settle = true) => {
+    const wasRunning = frame !== 0 && settle;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
     controller.release();
@@ -154,21 +166,41 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     render();
     if (wasRunning && point) handlers.onSettle?.(point);
   };
-  const onActiveChange = (isActive: boolean) => {
-    if (isActive) startLoop();
-  };
 
   const stick = createStick({
     mode: '2d',
     label: 'Джойстик: зсув точки по X або Z',
     testid: 'stick-xz',
-    onActiveChange,
+    onActiveChange(isActive) {
+      if (isActive) {
+        startLoop();
+        return;
+      }
+      // Відпустили джойстик: дорахувати рух до цієї миті й зняти фіксацію осі —
+      // навіть якщо повзунок ще тримають.
+      integrate(performance.now());
+      controller.release();
+      axis = null;
+      stick.setKnobAxis(null);
+      if (!slider.active) stopLoop();
+      else render();
+    },
   });
   const slider = createStick({
     mode: 'vertical',
     label: 'Повзунок: зсув точки по висоті Y',
     testid: 'stick-y',
-    onActiveChange,
+    onActiveChange(isActive) {
+      if (isActive) {
+        startLoop();
+        return;
+      }
+      integrate(performance.now());
+      if (axis === 'Y') axis = null;
+      slider.setKnobAxis(null);
+      if (!stick.active) stopLoop();
+      else render();
+    },
   });
   controls.append(stick.element, slider.element, confirm);
   element.append(readout, controls);
@@ -199,7 +231,10 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     }
     const screen = viewer.screenAxes(point);
     // Стрілки на самому джойстику — куди він рухає X і Z (з урахуванням «розведення» осей).
-    stick.setAxes(joystickDirections({ X: screen.X, Z: screen.Z }), axis === 'X' || axis === 'Z' ? axis : null);
+    stick.setAxes(
+      controller.dirs ?? joystickDirections({ X: screen.X, Z: screen.Z }),
+      axis === 'X' || axis === 'Z' ? axis : null,
+    );
     const base = viewer.projectPoint(point);
     overlay.hidden = !base.visible;
     if (!base.visible) return;
@@ -281,7 +316,10 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       viewer.requestRender();
     },
     close() {
-      stopLoop();
+      // Якщо джойстик ще тримають (підтвердили другим пальцем), наступна точка від цього
+      // утримання не поїде: цикл зупинено, а час руху скинуто.
+      stopLoop(false);
+      lastTime = 0;
       point = null;
       origin = null;
       label = null;

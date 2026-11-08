@@ -276,6 +276,8 @@ async function tapWall(page: Page, point: Vec3, inward: Vec3, tap: (p: { x: numb
 /** «Підтвердити точку» (після доведення точки рулетки). */
 async function confirmPoint(page: Page): Promise<void> {
   await page.getByTestId('confirm-point').click();
+  // Після підтвердження ~0,35 с дотики ігноруються (захист від подвійного натискання).
+  await page.waitForTimeout(400);
 }
 
 function note(testInfo: TestInfo, text: string) {

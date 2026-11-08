@@ -105,7 +105,21 @@ export function createStick(options: StickOptions): Stick {
     return { x, y };
   };
 
+  const release = () => {
+    if (pointerId === null) return;
+    // Спершу повідомляємо (значення ще останнє — редактор дорахує рух до моменту відпускання),
+    // потім скидаємо.
+    options.onActiveChange?.(false);
+    pointerId = null;
+    value = { x: 0, y: 0 };
+    element.classList.remove('stick--active');
+    setKnob(value, true);
+  };
+
   const down = (event: PointerEvent) => {
+    // Події джойстика не мають доходити до камери (OrbitControls слухає документ):
+    // інакше палець на джойстику плюс палець на скані «смикають» камеру.
+    event.stopPropagation();
     if (pointerId !== null) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
@@ -115,7 +129,7 @@ export function createStick(options: StickOptions): Stick {
       // Палець може вийти за межі джойстика — події все одно йдуть сюди.
       element.setPointerCapture(event.pointerId);
     } catch {
-      // Деякі браузери не дають захопити вказівник — працюємо й без цього.
+      // Деякі браузери не дають захопити вказівник — працюємо й без цього (див. onWindowUp).
     }
     element.classList.add('stick--active');
     value = { x: 0, y: 0 };
@@ -123,26 +137,35 @@ export function createStick(options: StickOptions): Stick {
     options.onActiveChange?.(true);
   };
   const move = (event: PointerEvent) => {
+    event.stopPropagation();
     if (event.pointerId !== pointerId) return;
     event.preventDefault();
     value = read(event);
     setKnob(value, false);
   };
   const up = (event: PointerEvent) => {
+    event.stopPropagation();
     if (event.pointerId !== pointerId) return;
-    pointerId = null;
-    value = { x: 0, y: 0 };
-    element.classList.remove('stick--active');
-    setKnob(value, true);
-    options.onActiveChange?.(false);
+    release();
+  };
+  // Відпустили деінде (захоплення не спрацювало) — теж відпускання.
+  const onWindowUp = (event: PointerEvent) => {
+    if (event.pointerId === pointerId) release();
+  };
+  // Програму згорнули / перемкнули вкладку, а «відпускання» не прийшло — не їхати далі самому.
+  const onHidden = () => {
+    if (document.visibilityState === 'hidden') release();
   };
 
   element.addEventListener('pointerdown', down);
   element.addEventListener('pointermove', move);
   element.addEventListener('pointerup', up);
   element.addEventListener('pointercancel', up);
-  element.addEventListener('lostpointercapture', up);
   element.addEventListener('contextmenu', (event) => event.preventDefault());
+  window.addEventListener('pointerup', onWindowUp, true);
+  window.addEventListener('pointercancel', onWindowUp, true);
+  window.addEventListener('blur', release);
+  document.addEventListener('visibilitychange', onHidden);
 
   return {
     element,
@@ -175,6 +198,11 @@ export function createStick(options: StickOptions): Stick {
       knob.textContent = axis ?? '';
     },
     dispose() {
+      release();
+      window.removeEventListener('pointerup', onWindowUp, true);
+      window.removeEventListener('pointercancel', onWindowUp, true);
+      window.removeEventListener('blur', release);
+      document.removeEventListener('visibilitychange', onHidden);
       element.remove();
     },
   };
