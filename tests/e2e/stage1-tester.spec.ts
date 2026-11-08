@@ -553,8 +553,15 @@ test.describe('Етап 1 (tester): камера — мишка', () => {
     const centerPoint = await project(page, { x: 0, y: 1.3, z: -1.5 });
     const before = await Promise.all([project(page, { x: -2, y: 0, z: -1.5 }), project(page, { x: 2, y: 0, z: -1.5 })]);
     await page.mouse.move(cursor.x, cursor.y);
+    // Playwright не вміє page.mouse.wheel у мобільному WebKit (профілі iPad/iPhone у CI),
+    // тому подію колеса (як від мишки чи трекпада iPad) надсилаємо прямо в полотно.
     for (let i = 0; i < 6; i++) {
-      await page.mouse.wheel(0, -250);
+      await page.evaluate(({ x, y }) => {
+        const canvas = window.__trasa!.viewer.canvas;
+        canvas.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -250, deltaMode: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }),
+        );
+      }, cursor);
       await page.waitForTimeout(50);
     }
     await waitForIdle(page);
