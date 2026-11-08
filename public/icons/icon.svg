@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Іконка «Траса 3D»: повітропровід з поворотом на 90° і його вісь (траса) з вузлами. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a9bff"/>
+      <stop offset="1" stop-color="#0058c7"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#e3e8ef"/>
+      <stop offset="1" stop-color="#b9c3cf"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Сітка підлоги -->
+  <g stroke="#ffffff" stroke-opacity="0.14" stroke-width="3">
+    <path d="M0 128H512M0 256H512M0 384H512M128 0V512M256 0V512M384 0V512"/>
+  </g>
+  <!-- Повітропровід (оцинкована сталь) -->
+  <path d="M84 364H292A78 78 0 0 0 370 286V112" fill="none" stroke="url(#steel)" stroke-width="96"/>
+  <!-- Фланці -->
+  <g stroke="#9aa6b4" stroke-width="10">
+    <path d="M84 312V416M190 312V416M318 112H422M318 214H422"/>
+  </g>
+  <!-- Вісь (траса) -->
+  <path d="M84 364H370V112" fill="none" stroke="#0a84ff" stroke-width="12" stroke-linejoin="round" stroke-dasharray="28 16"/>
+  <!-- Вузли траси -->
+  <g fill="#ff9f0a" stroke="#ffffff" stroke-width="7">
+    <circle cx="84" cy="364" r="21"/>
+    <circle cx="370" cy="364" r="21"/>
+    <circle cx="370" cy="112" r="21"/>
+  </g>
+</svg>
