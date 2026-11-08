@@ -93,3 +93,30 @@ describe('тестова кімната .glb', () => {
     });
   });
 });
+
+describe('тестова кімната .zip («як з Polycam»)', () => {
+  it('файл у репозиторії збігається з генератором (інакше: npm run make:room)', async () => {
+    const { buildRoomZip, ROOM_ZIP_FILE_NAME } = await import('../fixtures/room.ts');
+    const zipBytes = new Uint8Array(await readFile(fileURLToPath(new URL(`../fixtures/${ROOM_ZIP_FILE_NAME}`, import.meta.url))));
+    expect(Buffer.from(zipBytes).equals(Buffer.from(buildRoomZip()))).toBe(true);
+  });
+
+  it('у архіві знаходиться модель, усі її файли на місці й цілі', async () => {
+    const { buildRoomZip, ROOM_ZIP_FOLDER } = await import('../fixtures/room.ts');
+    const { readZipEntries, extractZipEntry } = await import('../../src/core/zip.ts');
+    const { pickMainModel, externalReferences, resolveUri, dirname } = await import('../../src/core/scan-files.ts');
+    const zip = buildRoomZip();
+    const entries = readZipEntries(zip);
+    const main = pickMainModel(entries.map((e) => e.name));
+    expect(main).toBe(`${ROOM_ZIP_FOLDER}/room.gltf`);
+    const json = JSON.parse(new TextDecoder().decode(await extractZipEntry(zip, entries.find((e) => e.name === main)!)));
+    const refs = externalReferences(json);
+    expect(refs.map((r) => r.kind).sort()).toEqual(['buffer', 'image']);
+    for (const ref of refs) {
+      const path = resolveUri(dirname(main!), ref.uri);
+      const entry = entries.find((e) => e.name === path);
+      expect(entry, path).toBeDefined();
+      expect((await extractZipEntry(zip, entry!)).byteLength).toBe(entry!.size);
+    }
+  });
+});
