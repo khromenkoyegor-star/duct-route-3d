@@ -135,6 +135,17 @@ describe('інформація про скан', () => {
     expect(describeScan({ ...room, fileBytes: 40 * 1024 * 1024 }, 'tablet').warnings).toEqual([]);
   });
 
+  it('віконцем показуємо лише ризики; зменшені текстури — тільки довідково', () => {
+    const reduced = describeScan({ ...room, texturesReduced: 2 }, 'phone');
+    expect(reduced.warnings).toHaveLength(1);
+    expect(reduced.risks).toEqual([]);
+    const heavy = describeScan({ ...room, triangles: 2_000_000, texturesReduced: 1 }, 'phone');
+    expect(heavy.risks).toHaveLength(1);
+    expect(heavy.risks[0]).toMatch(/Дуже детальний скан/);
+    expect(heavy.warnings).toHaveLength(2);
+    expect(describeScan({ ...room, triangles: 0 }, 'tablet').risks[0]).toMatch(/немає поверхонь/);
+  });
+
   it('зменшені текстури й порожній файл — пояснення', () => {
     expect(describeScan({ ...room, texturesReduced: 2 }, 'phone').warnings[0]).toMatch(/Текстури зменшено \(2\)/);
     expect(describeScan({ ...room, triangles: 0 }, 'phone').warnings[0]).toMatch(/немає поверхонь/);

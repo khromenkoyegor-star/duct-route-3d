@@ -229,7 +229,7 @@ test.describe('Етап 0: сцена — поведінка', () => {
       await page.mouse.up();
       await waitForIdle(page);
       const axes = await projectAxes(page);
-      expect(axes.Y.y).toBeLessThan(axes.origin.y - 20);
+      expect(axes.Y.y).toBeLessThan(axes.origin.y - 8);
       expect(Math.abs(axes.Y.x - axes.origin.x)).toBeLessThan(1);
     }
   });
@@ -271,7 +271,7 @@ test.describe('Етап 0: сцена — поведінка', () => {
     await waitForIdle(page);
     const after = await projectAxes(page);
     expect(Math.abs(after.X.x - before.X.x) + Math.abs(after.Z.x - before.Z.x)).toBeGreaterThan(20);
-    expect(after.Y.y).toBeLessThan(after.origin.y - 20);
+    expect(after.Y.y).toBeLessThan(after.origin.y - 8);
     expect(Math.abs(after.Y.x - after.origin.x)).toBeLessThan(1);
   });
 

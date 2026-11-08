@@ -13,13 +13,16 @@ import {
 import { mmToM } from '../core/units';
 import type { SceneTheme } from './theme';
 
-/** Довжина стрілки осі — одна клітинка сітки. */
-const AXIS_LENGTH_MM = 1000;
-const SHAFT_RADIUS_MM = 18;
-const HEAD_RADIUS_MM = 55;
-const HEAD_LENGTH_MM = 160;
-const LABEL_SIZE_MM = 340;
-const LABEL_GAP_MM = 220;
+/** Довжина стрілки осі — невелика, щоб не закривати скан (на прохання Єгора). */
+export const AXIS_LENGTH_MM = 300;
+const SHAFT_RADIUS_MM = 6;
+const HEAD_RADIUS_MM = 18;
+const HEAD_LENGTH_MM = 60;
+const LABEL_GAP_MM = 90;
+/** Підписи X/Y/Z — сталого розміру на екрані (≈ 18 px), незалежно від відстані. */
+const LABEL_SCREEN_SCALE = 0.02;
+/** Напівпрозорі — видно, але не заважають. */
+export const AXES_OPACITY = 0.6;
 
 export type AxisName = 'X' | 'Y' | 'Z';
 
@@ -93,7 +96,12 @@ export function createAxes(theme: SceneTheme): Axes {
 
   const parts: AxisParts[] = (['X', 'Y', 'Z'] as const).map((name) => {
     const direction = directions[name];
-    const material = new MeshBasicMaterial({ color: axisColor(theme, name) });
+    const material = new MeshBasicMaterial({
+      color: axisColor(theme, name),
+      transparent: true,
+      opacity: AXES_OPACITY,
+      depthWrite: false,
+    });
 
     const arrow = new Group();
     arrow.name = `axis-${name}`;
@@ -104,12 +112,17 @@ export function createAxes(theme: SceneTheme): Axes {
     group.add(arrow);
 
     const labelTexture = makeLabelTexture(name, axisColor(theme, name));
-    const labelMaterial = new SpriteMaterial({ map: labelTexture, depthTest: false, transparent: true });
+    const labelMaterial = new SpriteMaterial({
+      map: labelTexture,
+      depthTest: false,
+      transparent: true,
+      opacity: AXES_OPACITY,
+      sizeAttenuation: false,
+    });
     const label = new Sprite(labelMaterial);
     label.name = `axis-label-${name}`;
     label.renderOrder = 10;
-    const labelSize = mmToM(LABEL_SIZE_MM);
-    label.scale.set(labelSize, labelSize, 1);
+    label.scale.set(LABEL_SCREEN_SCALE, LABEL_SCREEN_SCALE, 1);
     label.position.copy(direction).multiplyScalar(length + mmToM(LABEL_GAP_MM));
     group.add(label);
 

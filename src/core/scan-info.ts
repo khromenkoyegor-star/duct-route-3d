@@ -32,7 +32,13 @@ export interface ScanInfo {
   offsetYMm: number;
   triangles: number;
   fileBytes: number;
+  /** Усі зауваження про скан (для довідки). */
   warnings: string[];
+  /**
+   * Лише ті, що загрожують роботі (скан може гальмувати чи закритися, або це не скан) —
+   * їх показуємо віконцем одразу після відкриття.
+   */
+  risks: string[];
 }
 
 /**
@@ -86,23 +92,36 @@ export function describeScan(stats: ScanStats, device: DeviceClass): ScanInfo {
   };
   const limits = SCAN_LIMITS[device];
   const where = device === 'phone' ? 'для iPhone' : 'для iPad';
-  const warnings: string[] = [];
+  const risks: string[] = [];
   if (stats.triangles > limits.triangles) {
-    warnings.push(
+    risks.push(
       `Дуже детальний скан (${formatCount(stats.triangles)} трикутників) — ${where} це забагато, може гальмувати або закритися.`,
     );
   }
   if (stats.fileBytes > limits.fileBytes) {
-    warnings.push(`Великий файл (${formatBytes(stats.fileBytes)}) — ${where} це забагато.`);
+    risks.push(`Великий файл (${formatBytes(stats.fileBytes)}) — ${where} це забагато.`);
   }
   if (stats.texturePixels > limits.texturePixels) {
-    warnings.push(`Дуже великі текстури — ${where} може не вистачити пам'яті.`);
-  }
-  if (stats.texturesReduced > 0) {
-    warnings.push(`Текстури зменшено (${stats.texturesReduced}), щоб скан не перевантажив пам'ять. Розміри від цього не змінюються.`);
+    risks.push(`Дуже великі текстури — ${where} може не вистачити пам'яті.`);
   }
   if (stats.triangles === 0) {
-    warnings.push('У файлі немає поверхонь — це не скан приміщення?');
+    risks.push('У файлі немає поверхонь — це не скан приміщення?');
   }
-  return { sizeMm, offsetYMm: mToMm(stats.offsetY), triangles: stats.triangles, fileBytes: stats.fileBytes, warnings };
+  const warnings = [...risks];
+  if (stats.texturesReduced > 0) {
+    // Довідково: на розміри не впливає, віконцем не показуємо.
+    warnings.splice(
+      risks.length - (stats.triangles === 0 ? 1 : 0),
+      0,
+      `Текстури зменшено (${stats.texturesReduced}), щоб скан не перевантажив пам'ять. Розміри від цього не змінюються.`,
+    );
+  }
+  return {
+    sizeMm,
+    offsetYMm: mToMm(stats.offsetY),
+    triangles: stats.triangles,
+    fileBytes: stats.fileBytes,
+    warnings,
+    risks,
+  };
 }

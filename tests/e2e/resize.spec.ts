@@ -36,6 +36,6 @@ test('після повороту пристрою масштаб сцени н�
   const openedRotated = await yArrowPx(fresh);
   await context.close();
 
-  expect(afterRotation).toBeGreaterThan(20);
+  expect(afterRotation).toBeGreaterThan(8);
   expect(Math.abs(afterRotation - openedRotated) / openedRotated).toBeLessThan(0.05);
 });

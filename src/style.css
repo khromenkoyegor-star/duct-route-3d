@@ -1262,3 +1262,67 @@ body {
     flex: 1 1 auto;
   }
 }
+
+/* ───────── Кнопки видів X / Y / Z (зверху зліва) ───────── */
+
+.view-bar {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--gap));
+  left: calc(var(--safe-left) + var(--gap));
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  border: 0.5px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+
+.view-button {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 19px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.view-button:active {
+  background: var(--fill);
+}
+
+.view-button:focus-visible {
+  outline: 3px solid var(--tint);
+  outline-offset: 1px;
+}
+
+.view-button--x {
+  color: var(--axis-x);
+}
+
+.view-button--y {
+  color: var(--axis-y);
+}
+
+.view-button--z {
+  color: var(--axis-z);
+}
+
+/* Багаторядкові повідомлення (попередження про важкий скан). */
+.card-text {
+  white-space: pre-line;
+}
+
+/* iPhone вертикально: панель рулетки — під кнопками видів. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .is-ruler .ruler-panel {
+    top: calc(var(--safe-top) + var(--gap) + 52px + 8px);
+  }
+}

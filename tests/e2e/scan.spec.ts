@@ -66,11 +66,13 @@ test.describe('Етап 1: відкриття скану', () => {
     expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo.sizeMm.z - 3000)).toBeLessThan(0.1);
 
-    await expect(page.getByTestId('scan-name')).toHaveText('room-4000x2700x3000.zip');
-    await expect(page.getByTestId('scan-size')).toHaveText(/^Габарит: X 4\s000 · Y 2\s700 · Z 3\s000 мм$/);
-    await expect(page.getByTestId('scan-stats')).toContainText('12 трикутників');
-    await expect(page.getByTestId('scan-offset')).toHaveText('Низ скану на Y = 0');
-    await expect(page.getByTestId('scan-warnings')).toBeHidden();
+    // Інформація про скан — у стані (на екрані постійно не показується, на прохання Єгора).
+    expect(s.scanName).toBe('room-4000x2700x3000.zip');
+    expect(s.scanInfo.triangles).toBe(12);
+    expect(Math.abs(s.scanInfo.offsetYMm)).toBeLessThan(0.1);
+    expect(s.scanInfo.warnings).toEqual([]);
+    // Скан не важкий — віконця з попередженням немає.
+    await expect(page.getByTestId('alert')).toBeHidden();
     await expect(page.getByTestId('ruler')).toBeEnabled();
     expect(errors).toEqual([]);
   });
@@ -98,7 +100,7 @@ test.describe('Етап 1: відкриття скану', () => {
     expect(s.error).toBeNull();
     expect(Math.abs(s.scanInfo.offsetYMm - 1400)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
-    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · скан піднято на 1\s400 мм$/);
+
     const box = await page.evaluate(() => {
       const b = window.__trasa!.viewer.scanBox()!;
       return { min: b.min.toArray(), max: b.max.toArray() };
@@ -410,15 +412,56 @@ test.describe('Етап 1: кнопки', () => {
     }
   });
 
-  test('панель інформації не перекриває кнопки', async ({ page }) => {
+  test('кнопки видів X/Y/Z: камера строго вздовж осі; повторне натискання — з протилежного боку', async ({ page }) => {
     await openApp(page);
     await chooseFiles(page, ROOM_ZIP);
-    const title = (await page.getByTestId('title').boundingBox())!;
-    for (const id of ['open-scan', 'show-all', 'ruler']) {
-      const b = (await page.getByTestId(id).boundingBox())!;
-      const overlap = title.x < b.x + b.width && b.x < title.x + title.width && title.y < b.y + b.height && b.y < title.y + title.height;
-      expect(overlap, id).toBe(false);
-    }
+    const dir = () =>
+      page.evaluate(() => {
+        const v = window.__trasa!.viewer.snapshotView();
+        const d = { x: v.position.x - v.target.x, y: v.position.y - v.target.y, z: v.position.z - v.target.z };
+        const l = Math.hypot(d.x, d.y, d.z);
+        return { x: d.x / l, y: d.y / l, z: d.z / l, l };
+      });
+    const before = await dir();
+    await page.getByTestId('view-y').click();
+    let d = await dir();
+    expect(d.y).toBeGreaterThan(0.9999); // згори
+    expect(Math.abs(d.l - before.l)).toBeLessThan(1e-6); // відстань та сама
+    // Вид згори: +X праворуч, +Z донизу на екрані (як план).
+    const axes = await page.evaluate(() => window.__trasa!.viewer.screenAxes({ x: 0, y: 0, z: 0 }));
+    expect(axes.X.x).toBeGreaterThan(0);
+    expect(Math.abs(axes.X.y)).toBeLessThan(Math.abs(axes.X.x) * 0.01);
+    expect(axes.Z.y).toBeGreaterThan(0);
+    await page.getByTestId('view-x').click();
+    d = await dir();
+    expect(Math.abs(d.x)).toBeGreaterThan(0.9999);
+    const sideX = Math.sign(d.x);
+    await page.getByTestId('view-x').click();
+    d = await dir();
+    expect(Math.sign(d.x)).toBe(-sideX); // з протилежного боку
+    await page.getByTestId('view-z').click();
+    d = await dir();
+    expect(Math.abs(d.z)).toBeGreaterThan(0.9999);
+  });
+
+  test('під час доведення точки вид дивиться на саму точку', async ({ page }) => {
+    await openApp(page);
+    await chooseFiles(page, ROOM_ZIP);
+    await page.getByTestId('ruler').click();
+    await page.getByTestId('view-y').click();
+    const p = await project(page, { x: 0.8, y: 0, z: 0.5 });
+    await page.mouse.click(Math.round(p.x), Math.round(p.y));
+    await expect(page.getByTestId('point-editor')).toBeVisible();
+    const point = (await state(page)).ruler.editor.point;
+    await page.getByTestId('view-x').click();
+    const view = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
+    expect(Math.hypot(view.target.x - point.x, view.target.y - point.y, view.target.z - point.z)).toBeLessThan(1e-6);
+    // Точка — у центрі кадру й не закрита панелями.
+    const sp = await project(page, point);
+    const vp = page.viewportSize()!;
+    expect(Math.abs(sp.x - vp.width / 2)).toBeLessThan(2);
+    // Доведення не зіпсоване: точка на місці.
+    expect((await state(page)).ruler.editor.point).toEqual(point);
   });
 });
 

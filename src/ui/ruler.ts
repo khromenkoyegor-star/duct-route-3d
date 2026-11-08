@@ -244,7 +244,7 @@ export function createRuler(
   const keepVisible = (world: Vector3) => {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const obstacles = [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor')]
+    const obstacles = [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor, .view-bar')]
       .filter((el) => !el.hidden && getComputedStyle(el).display !== 'none')
       .map((el) => el.getBoundingClientRect())
       .filter((r) => r.width > 0 && r.height > 0);

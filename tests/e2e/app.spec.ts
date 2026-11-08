@@ -78,8 +78,8 @@ test.describe('Етап 0: порожня 3D-сцена', () => {
   test('вісь Y дивиться вгору, X і Z лежать у площині підлоги', async ({ page }) => {
     await openApp(page);
     const axes = await projectAxes(page);
-    // Підпис Y — над початком координат і строго на одній вертикалі з ним.
-    expect(axes.Y.y).toBeLessThan(axes.origin.y - 40);
+    // Підпис Y — над початком координат (осі маленькі: ≈ 20–30 px) і строго на одній вертикалі з ним.
+    expect(axes.Y.y).toBeLessThan(axes.origin.y - 8);
     expect(Math.abs(axes.Y.x - axes.origin.x)).toBeLessThan(1);
     // X і Z — нижче за Y (горизонтальні осі).
     expect(axes.X.y).toBeGreaterThan(axes.Y.y);
@@ -109,7 +109,7 @@ test.describe('Етап 0: порожня 3D-сцена', () => {
     await page.waitForTimeout(800);
     const after = await projectAxes(page);
     expect(Math.abs(after.X.x - before.X.x) + Math.abs(after.Z.x - before.Z.x)).toBeGreaterThan(20);
-    expect(after.Y.y).toBeLessThan(after.origin.y - 40);
+    expect(after.Y.y).toBeLessThan(after.origin.y - 8);
     expect(Math.abs(after.Y.x - after.origin.x)).toBeLessThan(1);
   });
 
@@ -121,25 +121,33 @@ test.describe('Етап 0: порожня 3D-сцена', () => {
     expect(await page.evaluate(() => window.__trasa!.viewer.frameCount)).toBe(frames);
   });
 
-  test('панелі: назва, версія, масштаб сітки; усе в межах екрана', async ({ page }) => {
+  test('кнопки видів X/Y/Z і дій — у межах екрана, не перекриваються; сторінка не прокручується', async ({ page }) => {
     await openApp(page);
-    await expect(page.getByTestId('title')).toContainText('Траса 3D');
-    await expect(page.getByTestId('version')).toHaveText(/^версія \S+ · \d{2}\.\d{2}\.\d{4}/);
-    await expect(page.getByTestId('legend')).toContainText(/Клітинка сітки — 1\s000 мм/);
-    await expect(page.getByTestId('legend')).toContainText('Y — вгору');
-
+    // Панелі з назвою/версією й легенди на екрані немає (на прохання Єгора) — лише кнопки.
+    await expect(page.locator('[data-testid="title"], [data-testid="legend"]')).toHaveCount(0);
     const viewport = page.viewportSize()!;
-    for (const id of ['title', 'legend']) {
+    const boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
+    for (const id of ['view-x', 'view-y', 'view-z', 'open-scan', 'show-all', 'ruler']) {
       const box = (await page.getByTestId(id).boundingBox())!;
+      boxes[id] = box;
+      expect(box.width, id).toBeGreaterThanOrEqual(44);
+      expect(box.height, id).toBeGreaterThanOrEqual(44);
       expect(box.x, id).toBeGreaterThanOrEqual(0);
       expect(box.y, id).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width, id).toBeLessThanOrEqual(viewport.width);
       expect(box.y + box.height, id).toBeLessThanOrEqual(viewport.height);
     }
-    // Панелі не перекривають одна одну.
-    const title = (await page.getByTestId('title').boundingBox())!;
-    const legend = (await page.getByTestId('legend').boundingBox())!;
-    expect(title.y + title.height).toBeLessThan(legend.y);
+    // Кнопки видів — у верхній частині екрана.
+    for (const id of ['view-x', 'view-y', 'view-z']) expect(boxes[id]!.y, id).toBeLessThan(viewport.height / 4);
+    const ids = Object.keys(boxes);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = boxes[ids[i]!]!;
+        const b = boxes[ids[j]!]!;
+        const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+        expect(overlap, `${ids[i]} / ${ids[j]}`).toBe(false);
+      }
+    }
     // Сторінка не прокручується.
     const scroll = await page.evaluate(() => ({
       w: document.documentElement.scrollWidth,
