@@ -130,6 +130,21 @@ export function externalReferences(json: unknown): GltfReference[] {
   return refs;
 }
 
+/** JSON-частина GLB-файлу (перший чанк) або null, якщо файл не схожий на GLB. */
+export function readGlbJson(bytes: Uint8Array): unknown {
+  if (bytes.length < 20) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (dv.getUint32(0, true) !== 0x46546c67) return null; // 'glTF'
+  const chunkLength = dv.getUint32(12, true);
+  const chunkType = dv.getUint32(16, true);
+  if (chunkType !== 0x4e4f534a || 20 + chunkLength > bytes.length) return null; // 'JSON'
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + chunkLength)));
+  } catch {
+    return null;
+  }
+}
+
 /** Обов'язкові розширення glTF, яких додаток поки не вміє (наприклад, стиснення Draco). */
 const SUPPORTED_REQUIRED = new Set(['KHR_materials_unlit', 'KHR_texture_transform', 'KHR_mesh_quantization']);
 

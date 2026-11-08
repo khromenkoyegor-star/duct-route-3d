@@ -236,11 +236,15 @@ test.describe('Етап 1: «Рулетка»', () => {
 
   test('між протилежними стінами — 4000 мм (±1 мм)', async ({ page }) => {
     await startRuler(page);
+    // WebKit округлює координати кліку до цілих пікселів, а стіни видно під кутом —
+    // тож клікаємо в цілі пікселі строго симетрично відносно центру (камера на осі кімнати).
     const a = await project(page, { x: -2, y: 1.2, z: 0 });
-    const b = await project(page, { x: 2, y: 1.2, z: 0 });
-    await page.mouse.click(a.x, a.y);
+    const cx = page.viewportSize()!.width / 2;
+    const ax = Math.round(a.x);
+    const y = Math.round(a.y);
+    await page.mouse.click(ax, y);
     await expect(page.getByTestId('ruler-text')).toHaveText('Тепер — другої точки');
-    await page.mouse.click(b.x, b.y);
+    await page.mouse.click(2 * cx - ax, y);
     const s = await state(page);
     expect(s.ruler.points).toHaveLength(2);
     expect(Math.abs(s.ruler.distanceMm - 4000)).toBeLessThanOrEqual(1);
@@ -249,8 +253,14 @@ test.describe('Етап 1: «Рулетка»', () => {
 
   test('підлога — стеля: 2700 мм (±1 мм), дотиком пальця на сенсорних пристроях', async ({ page }, testInfo) => {
     await startRuler(page);
-    const tap = async (p: { x: number; y: number }) =>
-      testInfo.project.use.hasTouch ? page.touchscreen.tap(p.x, p.y) : page.mouse.click(p.x, p.y);
+    // Камера на одній вертикалі з точками: підлогу й стелю видно не надто навскіс,
+    // і округлення кліку до пікселя (WebKit) не дає помітної похибки.
+    await page.evaluate(() => window.__trasa!.viewer.setView({ x: 0.5, y: 1.35, z: 6 }, { x: 0.5, y: 1.35, z: -1 }));
+    const tap = async (p: { x: number; y: number }) => {
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      return testInfo.project.use.hasTouch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y);
+    };
     await tap(await project(page, { x: 0.5, y: 0, z: -1 }));
     await tap(await project(page, { x: 0.5, y: 2.7, z: -1 }));
     const s = await state(page);
@@ -302,8 +312,11 @@ test.describe('Етап 1: «Рулетка»', () => {
   test('точка ставиться там, де натиснули: тремтіння не зсуває ні точку, ні камеру', async ({ page }) => {
     await startRuler(page);
     const target = { x: -2, y: 1.2, z: 0.3 };
+    // Дивимось на стіну прямо (не навскіс): 1 px ≈ 6 мм, похибку дає лише тремтіння, якщо його не прибрати.
+    await page.evaluate((t) => window.__trasa!.viewer.setView({ x: 3, y: t.y, z: t.z }, t), target);
     const view = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
-    const p = await project(page, target);
+    const projected = await project(page, target);
+    const p = { x: Math.round(projected.x), y: Math.round(projected.y) };
     // Натиснули точно в ціль, рука здригнулась на 4 px, відпустили.
     await page.mouse.move(p.x, p.y);
     await page.mouse.down();
@@ -314,7 +327,7 @@ test.describe('Етап 1: «Рулетка»', () => {
     expect(s.ruler.points).toHaveLength(1);
     const hit = s.ruler.points[0];
     const errorMm = Math.hypot(hit.x - target.x, hit.y - target.y, hit.z - target.z) * 1000;
-    expect(errorMm).toBeLessThan(20); // менше пікселя на такій відстані
+    expect(errorMm).toBeLessThan(10); // у межах округлення до пікселя; без виправлення було б ≈ 20+ мм
     // Камера там само, де була до натискання (інерції від тремтіння немає).
     const after = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
     expect(Math.hypot(after.position.x - view.position.x, after.position.y - view.position.y, after.position.z - view.position.z)).toBeLessThan(1e-6);

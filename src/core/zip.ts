@@ -52,10 +52,15 @@ function view(bytes: Uint8Array): DataView {
 
 function findEndOfCentralDirectory(bytes: Uint8Array, dv: DataView): number {
   const stop = Math.max(0, bytes.length - EOCD_MIN - MAX_COMMENT);
+  let loose = -1;
   for (let i = bytes.length - EOCD_MIN; i >= stop; i--) {
-    if (dv.getUint32(i, true) === SIG_EOCD) return i;
+    if (dv.getUint32(i, true) !== SIG_EOCD) continue;
+    // Справжній кінець каталогу: його коментар закінчується рівно в кінці файлу.
+    // (Байти «PK\x05\x06» можуть траплятися й усередині самого коментаря.)
+    if (i + EOCD_MIN + dv.getUint16(i + 20, true) === bytes.length) return i;
+    if (loose < 0) loose = i;
   }
-  return -1;
+  return loose;
 }
 
 const utf8 = new TextDecoder('utf-8');

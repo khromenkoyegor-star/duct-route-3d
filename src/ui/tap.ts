@@ -1,13 +1,13 @@
 /**
  * Короткий дотик / клік, який не плутається з перетягуванням (обертанням камери).
  * Дотик = один палець (або ліва кнопка мишки) майже без руху: мишка ≤ 5 px, палець ≤ 10 px
- * (палець завжди трохи тремтить), не довше TAP_MAX_MS.
+ * (палець завжди трохи тремтить). Тривалість не обмежуємо: нерухоме натискання камеру не крутить,
+ * тож повільний акуратний дотик — теж дотик.
  * Точка дотику — місце НАТИСКАННЯ (а не відпускання): саме туди людина цілилась.
  * Якщо під час жесту торкнувся другий палець — це щипок/зсув, а не дотик.
  */
 export const TAP_MAX_MOVE_MOUSE_PX = 5;
 export const TAP_MAX_MOVE_TOUCH_PX = 10;
-export const TAP_MAX_MS = 800;
 
 export interface TapHandlers {
   /** Натискання почалось (можна запам'ятати положення камери). */
@@ -19,7 +19,6 @@ export interface TapHandlers {
 interface Track {
   x: number;
   y: number;
-  t: number;
   limit: number;
   cancelled: boolean;
 }
@@ -35,7 +34,6 @@ export function onTap(element: HTMLElement, handlers: TapHandlers): () => void {
     active.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
-      t: event.timeStamp,
       limit,
       cancelled: active.size > 0,
     });
@@ -50,7 +48,6 @@ export function onTap(element: HTMLElement, handlers: TapHandlers): () => void {
     const track = active.get(event.pointerId);
     active.delete(event.pointerId);
     if (!track || track.cancelled) return;
-    if (event.timeStamp - track.t > TAP_MAX_MS) return;
     if (Math.hypot(event.clientX - track.x, event.clientY - track.y) > track.limit) return;
     handlers.onTap(track.x, track.y);
   };

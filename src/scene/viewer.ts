@@ -184,11 +184,10 @@ export function createViewer(container: HTMLElement): Viewer {
     requestRender();
   }
 
+  /** Межі скану рахуються один раз (за вершинами — точно) при заміні скану. */
+  let cachedScanBox: Box3 | null = null;
   function scanBox(): Box3 | null {
-    if (scanGroup.children.length === 0) return null;
-    scanGroup.updateMatrixWorld(true);
-    const box = new Box3().setFromObject(scanGroup);
-    return box.isEmpty() ? null : box;
+    return cachedScanBox ? cachedScanBox.clone() : null;
   }
 
   function showAll(direction: 'default' | 'current' = 'current'): void {
@@ -279,7 +278,13 @@ export function createViewer(container: HTMLElement): Viewer {
     projectPoint,
     setScan(root) {
       scanGroup.clear();
-      if (root) scanGroup.add(root);
+      cachedScanBox = null;
+      if (root) {
+        scanGroup.add(root);
+        scanGroup.updateMatrixWorld(true);
+        const box = new Box3().setFromObject(scanGroup, true);
+        cachedScanBox = box.isEmpty() ? null : box;
+      }
       requestRender();
     },
     scanBox,

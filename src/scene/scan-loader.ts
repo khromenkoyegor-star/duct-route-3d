@@ -6,6 +6,7 @@ import {
   Box3,
   type BufferGeometry,
   type Group,
+  LoadingManager,
   type Material,
   Mesh,
   MeshBasicMaterial,
@@ -22,7 +23,9 @@ import {
   externalReferences,
   foreignFormatHint,
   mimeType,
+  normalizePath,
   pickMainModel,
+  readGlbJson,
   resolveUri,
   unsupportedRequiredExtensions,
 } from '../core/scan-files';
@@ -97,7 +100,9 @@ async function collectSources(
     }
     const sources = new Map<string, Source>();
     for (const entry of entries) {
-      if (!entry.isDirectory) sources.set(entry.name, { read: () => extractZipEntry(bytes, entry) });
+      // «./scene.bin», «Room\\scene.bin» тощо → однаковий вигляд шляху, як і в посиланнях моделі.
+      const path = normalizePath(entry.name);
+      if (!entry.isDirectory && path !== '') sources.set(path, { read: () => extractZipEntry(bytes, entry) });
     }
     const main = pickMainModel([...sources.keys()]);
     if (!main) {
@@ -244,7 +249,14 @@ function makeUnlit(root: Object3D): void {
     if (!mesh.isMesh) return;
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material);
   });
-  for (const texture of drop) if (!keep.has(texture)) disposeTexture(texture);
+  // Одна картинка може бути спільною для кольору й нормалей (різні семплери) —
+  // таку картинку не закриваємо, лише звільняємо невикористану текстуру.
+  const keptSources = new Set<unknown>([...keep].map((t) => t.source));
+  for (const texture of drop) {
+    if (keep.has(texture)) continue;
+    if (keptSources.has(texture.source)) texture.dispose();
+    else disposeTexture(texture);
+  }
 }
 
 /** Зменшити текстури, більші за maxSide. Повертає кількість зменшених. */
@@ -288,7 +300,8 @@ async function limitTextures(root: Object3D, maxSide: number): Promise<number> {
 /** Статистика для панелі інформації: межі (м), трикутники, текстури. */
 function collectStats(root: Object3D, fileBytes: number, texturesReduced: number): ScanStats {
   root.updateMatrixWorld(true);
-  const box = new Box3().setFromObject(root);
+  // precise: межі за справжніми вершинами (інакше повернутий вузол дає завищений габарит).
+  const box = new Box3().setFromObject(root, true);
   let triangles = 0;
   const textures = new Set<Texture>();
   root.traverse((object) => {
@@ -323,8 +336,8 @@ export interface PreparedScan {
   kind: 'glb' | 'gltf';
   main: string;
   mainBytes: Uint8Array;
-  /** Для .gltf — розібраний JSON і шляхи його зовнішніх файлів. */
-  json: GltfJson | null;
+  /** JSON моделі (для GLB — з першого чанку) і шляхи її зовнішніх файлів. */
+  json: GltfJson;
   refs: Array<{ kind: 'buffer' | 'image'; index: number; path: string; source: Source }>;
 }
 
@@ -348,14 +361,19 @@ export async function prepareScan(files: readonly ScanFile[], onPhase: (phase: L
   }
   const kind = detectScanFileKind(main, mainBytes);
 
-  if (kind === 'glb') return { name, fileBytes, kind, main, mainBytes, json: null, refs: [] };
-  if (kind !== 'gltf') throw new ScanLoadError(NOT_A_SCAN);
+  if (kind !== 'gltf' && kind !== 'glb') throw new ScanLoadError(NOT_A_SCAN);
 
   let json: GltfJson;
-  try {
-    json = JSON.parse(new TextDecoder().decode(mainBytes));
-  } catch {
-    throw new ScanLoadError(`Файл моделі «${basename(main)}» пошкоджений.`);
+  if (kind === 'glb') {
+    const glbJson = readGlbJson(mainBytes);
+    if (!glbJson) throw new ScanLoadError(`Файл моделі «${basename(main)}» пошкоджений.`);
+    json = glbJson as GltfJson;
+  } else {
+    try {
+      json = JSON.parse(new TextDecoder().decode(mainBytes));
+    } catch {
+      throw new ScanLoadError(`Файл моделі «${basename(main)}» пошкоджений.`);
+    }
   }
   if (typeof json !== 'object' || json === null || typeof json.asset !== 'object') {
     throw new ScanLoadError(`Файл «${basename(main)}» — не 3D-модель glTF.`);
@@ -385,37 +403,50 @@ export async function prepareScan(files: readonly ScanFile[], onPhase: (phase: L
   return { name, fileBytes, kind, main, mainBytes, json, refs };
 }
 
+/**
+ * Жодних мережевих запитів: усі файли моделі — лише з вибраних файлів (blob:) або вбудовані (data:).
+ * Будь-яку іншу адресу (сервер, сторонній сайт) підміняємо порожньою — скан нікуди не «дзвонить».
+ */
+function offlineManager(byUri: Map<string, string>): LoadingManager {
+  const manager = new LoadingManager();
+  manager.setURLModifier((url) => {
+    const mapped = byUri.get(url);
+    if (mapped) return mapped;
+    if (/^(blob:|data:)/i.test(url)) return url;
+    return 'data:,';
+  });
+  return manager;
+}
+
 /** Крок 2 — побудувати 3D: розпакувати файли моделі, завантажити, підготувати до показу. */
 export async function buildScan(prepared: PreparedScan, options: LoadOptions): Promise<LoadedScan> {
   const onPhase = options.onPhase ?? (() => {});
   const urls: string[] = [];
-  let data: ArrayBuffer | string;
-  if (prepared.kind === 'glb') {
-    data = toArrayBuffer(prepared.mainBytes);
-  } else {
-    // Зовнішні файли (геометрія, текстури) → тимчасові локальні адреси blob:, прямо в JSON.
-    onPhase('unzipping');
-    const json = prepared.json!;
-    try {
-      for (const ref of prepared.refs) {
-        const bytes = await ref.source.read();
-        const url = URL.createObjectURL(new Blob([toArrayBuffer(bytes)], { type: mimeType(ref.path) }));
-        urls.push(url);
-        const list = ref.kind === 'buffer' ? json.buffers : json.images;
-        list![ref.index]!.uri = url;
-      }
-    } catch (error) {
-      for (const url of urls) URL.revokeObjectURL(url);
-      if (error instanceof ZipError) throw new ScanLoadError(error.message);
-      throw error;
+  /** Як модель посилається на файл (рядок uri з файлу) → тимчасова локальна адреса blob:. */
+  const byUri = new Map<string, string>();
+  const json = prepared.json!;
+  if (prepared.refs.length > 0) onPhase('unzipping');
+  try {
+    for (const ref of prepared.refs) {
+      const bytes = await ref.source.read();
+      const url = URL.createObjectURL(new Blob([toArrayBuffer(bytes)], { type: mimeType(ref.path) }));
+      urls.push(url);
+      const item = (ref.kind === 'buffer' ? json.buffers : json.images)![ref.index]!;
+      if (typeof item.uri === 'string') byUri.set(item.uri, url);
+      // Для .gltf підставляємо прямо в JSON; для GLB (JSON усередині файлу) — через byUri.
+      if (prepared.kind === 'gltf') item.uri = url;
     }
-    data = JSON.stringify(json);
+  } catch (error) {
+    for (const url of urls) URL.revokeObjectURL(url);
+    if (error instanceof ZipError) throw new ScanLoadError(error.message);
+    throw error;
   }
+  const data: ArrayBuffer | string = prepared.kind === 'glb' ? toArrayBuffer(prepared.mainBytes) : JSON.stringify(json);
 
   onPhase('parsing');
   let root: Group;
   try {
-    const gltf = await new GLTFLoader().parseAsync(data, '');
+    const gltf = await new GLTFLoader(offlineManager(byUri)).parseAsync(data, '');
     root = gltf.scene;
   } catch (error) {
     console.error(error);
