@@ -300,6 +300,37 @@ describe('сцена: осі й масштаб', () => {
     expect(Math.abs(p.Y.x - p.origin.x)).toBeLessThan(0.5);
     s.viewer.dispose();
   });
+
+  it('projectPath(): вузли як у projectPoint; відрізок за камеру обрізається, цілком позаду — null', () => {
+    const s = setup();
+    // Камера в (0; 1; 5) дивиться на −Z.
+    s.viewer.setView({ x: 0, y: 1, z: 5 }, { x: 0, y: 1, z: 0 });
+    s.tick();
+    const path = [
+      { x: 0, y: 1, z: 0 },
+      { x: 1, y: 1, z: 0 },
+      { x: 1, y: 1, z: 10 }, // за камерою
+      { x: 1, y: 1, z: 12 }, // теж за камерою
+    ];
+    const projected = s.viewer.projectPath(path);
+    expect(projected.nodes).toHaveLength(4);
+    for (let i = 0; i < path.length; i++) {
+      const single = s.viewer.projectPoint(path[i]!);
+      expect(projected.nodes[i]!.visible).toBe(single.visible);
+      if (single.visible) {
+        expect(projected.nodes[i]!.x).toBeCloseTo(single.x, 6);
+        expect(projected.nodes[i]!.y).toBeCloseTo(single.y, 6);
+      }
+    }
+    expect(projected.segments).toHaveLength(3);
+    expect(projected.segments[0]).not.toBeNull();
+    // Другий відрізок обрізано: кінець — скінченна точка на екрані, праворуч від початку.
+    const [a, b] = projected.segments[1]!;
+    expect(Number.isFinite(b.x) && Number.isFinite(b.y)).toBe(true);
+    expect(b.x).toBeGreaterThan(a.x);
+    expect(projected.segments[2]).toBeNull();
+    s.viewer.dispose();
+  });
 });
 
 describe('сцена: малювання тільки при змінах', () => {

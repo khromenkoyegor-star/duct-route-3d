@@ -66,3 +66,51 @@ export function onTap(element: HTMLElement, handlers: TapHandlers): () => void {
     element.removeEventListener('pointercancel', cancel);
   };
 }
+
+/** Підказка, поки чекаємо повторного дотику. */
+export const HINT_CONFIRM_MOVE = 'Точку вже підсунуто. Торкніться тут ще раз, щоб перенести її сюди';
+/** Повторний дотик для перенесення вже підсунутої точки: не пізніше й не далі за це. */
+export const RETAP_MS = 4000;
+export const RETAP_PX = 40;
+
+/**
+ * Підсунуту джойстиком точку випадковий дотик не переносить: потрібен другий дотик у тому самому місці
+ * (не пізніше RETAP_MS і не далі RETAP_PX від першого).
+ */
+export interface RetapGuard {
+  /** Дотик у (x, y): true — це повторний дотик (можна переносити), false — перший, чекаємо другий. */
+  confirm(clientX: number, clientY: number): boolean;
+  /** Чи чекаємо зараз повторного дотику (для підказки). */
+  readonly waiting: boolean;
+  clear(): void;
+}
+
+/** onExpire — час на повторний дотик сплив (прибрати підказку). */
+export function createRetapGuard(onExpire: () => void): RetapGuard {
+  let pending: { x: number; y: number; time: number } | null = null;
+  let timer = 0;
+  const clear = () => {
+    pending = null;
+    if (timer) window.clearTimeout(timer);
+    timer = 0;
+  };
+  return {
+    confirm(x, y) {
+      const now = performance.now();
+      const repeated = !!pending && now - pending.time < RETAP_MS && Math.hypot(x - pending.x, y - pending.y) < RETAP_PX;
+      clear();
+      if (repeated) return true;
+      pending = { x, y, time: now };
+      timer = window.setTimeout(() => {
+        pending = null;
+        timer = 0;
+        onExpire();
+      }, RETAP_MS);
+      return false;
+    },
+    get waiting() {
+      return pending !== null;
+    },
+    clear,
+  };
+}

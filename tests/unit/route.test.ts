@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addRoute,
   emptyRouteSet,
+  formatPointCount,
   isValidRoute,
   lastDirection,
   lockedAxis,
@@ -133,5 +134,24 @@ describe('витягування наступної точки', () => {
 
   it('NaN-крок нічого не ламає', () => {
     expect(stepAlongSegment(A, A, 'X', Number.NaN, null)).toEqual(A);
+  });
+});
+
+describe('підпис кількості точок', () => {
+  it('українські форми множини', () => {
+    const cases: Array<[number, string]> = [
+      [1, '1 точка'],
+      [2, '2 точки'],
+      [4, '4 точки'],
+      [5, '5 точок'],
+      [11, '11 точок'],
+      [12, '12 точок'],
+      [14, '14 точок'],
+      [21, '21 точка'],
+      [22, '22 точки'],
+      [111, '111 точок'],
+      [502, '502 точки'],
+    ];
+    for (const [n, text] of cases) expect(formatPointCount(n)).toBe(text);
   });
 });

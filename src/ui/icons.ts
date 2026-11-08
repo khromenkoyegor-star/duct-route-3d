@@ -20,3 +20,14 @@ export const ICON_SHOW_ALL = svg(
 export const ICON_RULER = svg(
   '<path d="M3.5 15.5 15.5 3.5l5 5-12 12z"/><path d="m7 12 2 2M9.5 9.5l1.5 1.5M12 7l2 2M14.5 4.5 16 6"/>',
 );
+
+/** Ламана з вузлами — «Траса». */
+export const ICON_ROUTE = svg(
+  '<path d="M5 18.5h6.5v-11H19"/><circle cx="5" cy="18.5" r="2"/><circle cx="11.5" cy="7.5" r="2"/><circle cx="19" cy="7.5" r="2"/>',
+);
+
+/** Кошик — «Видалити траєкторію». */
+export const ICON_TRASH = svg(
+  '<path d="M4 6.5h16M9.5 6.5V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3v1.7"/>' +
+    '<path d="m6 6.5.9 12.2c.1.9.8 1.8 1.8 1.8h6.6c1 0 1.7-.9 1.8-1.8L18 6.5M10 10.5v6M14 10.5v6"/>',
+);

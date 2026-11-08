@@ -13,7 +13,8 @@ import type { PointM } from '../core/nudge';
 import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
 import { createPointEditor, type PointEditorState } from './point-editor';
-import { onTap } from './tap';
+import { createRetapGuard, HINT_CONFIRM_MOVE, onTap } from './tap';
+import { keepVisible } from './visibility';
 
 /** pickA — чекаємо точку А; editA — доводимо А; pickB / editB — так само Б; done — є результат. */
 export type RulerPhase = 'pickA' | 'editA' | 'pickB' | 'editB' | 'done';
@@ -39,8 +40,6 @@ export interface Ruler {
   /** Стрілки осей біля точки, яку доводять. */
   editorOverlay: HTMLElement;
   readonly state: RulerState;
-  /** Центр вільної від панелей частини екрана (куди ставити точку, що доводиться) або null. */
-  freeAreaCenter(): { x: number; y: number } | null;
   /** Щойно підтвердили точку (захист від подвійного натискання). */
   recentlyConfirmed(): boolean;
   setActive(active: boolean): void;
@@ -57,10 +56,6 @@ const HINTS: Record<RulerPhase, string> = {
   done: 'Торкніться скану, щоб почати новий вимір',
 };
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
-const HINT_CONFIRM_MOVE = 'Точку вже підсунуто. Торкніться тут ще раз, щоб перенести її сюди';
-/** Повторний дотик для перенесення підсунутої точки: не пізніше й не далі за це. */
-const MOVE_CONFIRM_MS = 4000;
-const MOVE_CONFIRM_PX = 40;
 /**
  * Після «Підтвердити точку» редактор зникає, і другий дотик подвійного натискання впав би
  * на те, що під кнопкою (скан чи кнопку «Рулетка»). Цей час такі дотики ігноруються.
@@ -132,16 +127,10 @@ export function createRuler(
   let phase: RulerPhase = 'pickA';
   let points: Vector3[] = [];
   let missed = false;
-  /** Перший дотик для перенесення вже підсунутої точки (чекаємо другий у тому самому місці). */
-  let pendingMove: { x: number; y: number; time: number } | null = null;
-  let pendingTimer = 0;
+  /** Перенести вже підсунуту точку можна лише повторним дотиком у тому самому місці. */
+  const retap = createRetapGuard(() => render());
   let confirmedAt = -Infinity;
   const recentlyConfirmed = () => performance.now() - confirmedAt < CONFIRM_COOLDOWN_MS;
-  const clearPending = () => {
-    pendingMove = null;
-    if (pendingTimer) window.clearTimeout(pendingTimer);
-    pendingTimer = 0;
-  };
   let downView: ViewSnapshot | null = null;
 
   const editingIndex = () => (phase === 'editA' ? 0 : phase === 'editB' ? 1 : -1);
@@ -158,14 +147,14 @@ export function createRuler(
       if (i < 0) return;
       points[i] = new Vector3(point.x, point.y, point.z);
       phase = i === 0 ? 'pickB' : 'done';
-      clearPending();
+      retap.clear();
       confirmedAt = performance.now();
       editor.close();
       handlers.onEditingChange?.(false);
       render();
     },
     onSettle(point) {
-      keepVisible(new Vector3(point.x, point.y, point.z));
+      keepVisible(viewer, point);
       render();
     },
   });
@@ -230,7 +219,7 @@ export function createRuler(
       text.textContent = HINTS[phase];
     }
     // Другий рядок: промах — попередження; інакше підказка, якщо головний рядок зайнятий числом.
-    const warning = missed ? HINT_MISS : pendingMove ? HINT_CONFIRM_MOVE : '';
+    const warning = missed ? HINT_MISS : retap.waiting ? HINT_CONFIRM_MOVE : '';
     sub.textContent = warning || (hasDistance ? HINTS[phase] : '');
     sub.hidden = sub.textContent === '';
     sub.classList.toggle('ruler-sub--warning', warning !== '');
@@ -239,65 +228,12 @@ export function createRuler(
     handlers.onChange?.(current);
   }
 
-  /**
-   * Точку має бути видно: якщо її закрила панель (джойстик, рулетка, кнопки) або вона за краєм екрана,
-   * камера зсувається так, щоб точка опинилась посередині вільної від панелей частини екрана.
-   */
-  /** Панелі й кнопки, що закривають сцену (видимі). */
-  const obstacleRects = () =>
-    [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor, .view-bar')]
-      .filter((el) => !el.hidden && getComputedStyle(el).display !== 'none')
-      .map((el) => el.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0);
-
-  /**
-   * Центр вільної від панелей частини екрана: смуга між верхніми й нижніми панелями
-   * або місце праворуч від редактора точки (iPhone горизонтально). null — вільного місця замало.
-   */
-  const freeAreaCenter = (): { x: number; y: number } | null => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const obstacles = obstacleRects();
-    const free = (left: number, right: number) => {
-      const overlapping = obstacles.filter((r) => r.right > left && r.left < right);
-      const top = Math.max(0, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
-      const bottom = Math.min(vh, ...overlapping.filter((r) => r.top >= vh / 2).map((r) => r.top));
-      return { left, right, top, bottom };
-    };
-    const editorRect = editor.element.getBoundingClientRect();
-    const candidates = [free(0, vw)];
-    if (editorRect.width > 0 && editorRect.right < vw * 0.75) candidates.push(free(editorRect.right, vw));
-    const score = (c: { left: number; right: number; top: number; bottom: number }) =>
-      Math.min(c.right - c.left, c.bottom - c.top);
-    const best = candidates.reduce((a, b) => (score(b) > score(a) ? b : a));
-    if (score(best) < 60) return null;
-    return { x: (best.left + best.right) / 2, y: (best.top + best.bottom) / 2 };
-  };
-
-  /**
-   * Точку має бути видно: якщо її закрила панель (джойстик, рулетка, кнопки) або вона за краєм екрана,
-   * камера повертається на місці так, щоб точка опинилась посередині вільної від панелей частини.
-   */
-  const keepVisible = (world: Vector3) => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const margin = 28;
-    const screen = viewer.projectPoint(world);
-    const covered = obstacleRects().some(
-      (r) => screen.x > r.left - margin && screen.x < r.right + margin && screen.y > r.top - margin && screen.y < r.bottom + margin,
-    );
-    const outside = !screen.visible || screen.x < margin || screen.y < margin || screen.x > vw - margin || screen.y > vh - margin;
-    if (!covered && !outside) return;
-    const at = freeAreaCenter();
-    viewer.centerOn(world, at ?? undefined);
-  };
-
   const startEditing = (index: 0 | 1, hit: Vector3) => {
     points = index === 0 ? [hit] : [points[0]!, hit];
     phase = index === 0 ? 'editA' : 'editB';
     editor.edit({ x: hit.x, y: hit.y, z: hit.z }, LABELS[index]);
     handlers.onEditingChange?.(true);
-    keepVisible(hit);
+    keepVisible(viewer, hit);
   };
 
   const stopTap = onTap(viewer.canvas, {
@@ -313,24 +249,11 @@ export function createRuler(
       if (hit) {
         // Підсунуту точку випадковий дотик не переносить: потрібен другий дотик у тому самому місці.
         const editing = phase === 'editA' || phase === 'editB';
-        if (editing && editor.state.moved) {
-          const now = performance.now();
-          const confirmed =
-            pendingMove && now - pendingMove.time < MOVE_CONFIRM_MS && Math.hypot(x - pendingMove.x, y - pendingMove.y) < MOVE_CONFIRM_PX;
-          if (!confirmed) {
-            clearPending();
-            pendingMove = { x, y, time: now };
-            // Підказка зникає, коли спливає час на повторний дотик.
-            pendingTimer = window.setTimeout(() => {
-              pendingMove = null;
-              pendingTimer = 0;
-              render();
-            }, MOVE_CONFIRM_MS);
-            render();
-            return;
-          }
+        if (editing && editor.state.moved && !retap.confirm(x, y)) {
+          render();
+          return;
         }
-        clearPending();
+        retap.clear();
         // А (або новий вимір) — у фазах pickA/editA/done; Б — у pickB/editB.
         startEditing(phase === 'pickB' || phase === 'editB' ? 1 : 0, hit);
       }
@@ -342,7 +265,7 @@ export function createRuler(
     points = [];
     phase = 'pickA';
     missed = false;
-    clearPending();
+    retap.clear();
     if (editor.state.active) {
       editor.close();
       handlers.onEditingChange?.(false);
@@ -360,7 +283,6 @@ export function createRuler(
       return state();
     },
     recentlyConfirmed,
-    freeAreaCenter,
     setActive(value) {
       active = value;
       if (!active) reset();
@@ -371,7 +293,7 @@ export function createRuler(
       render();
     },
     dispose() {
-      clearPending();
+      retap.clear();
       stopTap();
       stopFrames();
       editor.dispose();

@@ -1412,3 +1412,328 @@ body {
   color: var(--warning-label);
   font-weight: 600;
 }
+
+/* Віконце-питання: дві кнопки — поруч, більше — одна під одною (як в iOS). */
+.card--choice {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  margin: 14px -20px 0;
+}
+
+.card-actions .card-button {
+  margin-top: 0;
+}
+
+.card-actions--row {
+  flex-direction: row;
+}
+
+.card-actions--row .card-button {
+  flex: 1 1 0;
+}
+
+.card-actions--row .card-button + .card-button {
+  border-left: 0.5px solid var(--panel-border);
+}
+
+.card-button--cancel {
+  font-weight: 400;
+}
+
+.card-button--destructive {
+  color: var(--danger);
+}
+
+/* Короткі назви кнопок — лише в нижній панелі iPhone. */
+.tool-label-short {
+  display: none;
+}
+
+@media (max-width: 699px) and (min-height: 501px) {
+  .tool-label {
+    display: none;
+  }
+
+  .tool-label-short {
+    display: inline;
+  }
+}
+
+/* Траси на сцені: лінії, вузли, номер біля першої точки, довжини відрізків. */
+.route-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.route-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.route-halo,
+.route-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.route-halo {
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 8;
+}
+
+.route-line {
+  stroke: var(--route);
+  stroke-width: 4;
+}
+
+.route-line--pending {
+  stroke-dasharray: 8 7;
+}
+
+.route-nodes {
+  fill: #ffffff;
+  stroke: var(--route);
+  stroke-width: 3;
+}
+
+.route-nodes--pending {
+  fill: none;
+}
+
+.route--highlight .route-line,
+.route--highlight .route-nodes {
+  stroke: var(--danger);
+}
+
+.route--highlight .route-line {
+  stroke-width: 6;
+}
+
+.route--dim {
+  opacity: 0.35;
+}
+
+.route-tag,
+.route-length {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  will-change: transform;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Номер траси — біля першої точки, з протилежного від траси боку (route-layer.ts). */
+.route-tag {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 12px;
+  background: var(--route);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+.route-tag--highlight {
+  background: var(--danger);
+}
+
+.route-tag--dim {
+  opacity: 0.35;
+}
+
+.route-length {
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--route);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-length--live {
+  background: var(--route);
+  color: #ffffff;
+}
+
+/* Панель «Траса» і список «Видалити траєкторію» — під кнопками справа; з них натискають кнопки. */
+.route-panel,
+.route-delete-panel {
+  top: calc(var(--safe-top) + var(--gap) + 44px + 8px);
+  right: calc(var(--safe-right) + var(--gap));
+  width: 320px;
+  max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+  pointer-events: auto;
+}
+
+.route-info {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.panel-button {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--tint);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.panel-button--primary {
+  background: var(--tint);
+  color: var(--tint-label);
+}
+
+.panel-button--danger {
+  color: var(--danger);
+}
+
+.panel-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.panel-button:not(:disabled):active {
+  opacity: 0.6;
+}
+
+.panel-button:focus-visible,
+.route-row:focus-visible {
+  outline: 3px solid var(--tint);
+  outline-offset: 2px;
+}
+
+.route-list {
+  max-height: min(50vh, 360px);
+  margin: 8px 0 10px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.route-list li + li {
+  margin-top: 6px;
+}
+
+.route-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 12px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--label);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.route-row--selected {
+  border-color: var(--danger);
+  background: var(--card-bg);
+}
+
+.route-row-name {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.route-row-meta {
+  font-size: 15px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.is-route .viewport {
+  cursor: crosshair;
+}
+
+/* iPhone вертикально: панелі траси — зверху під кнопками видів, на всю ширину; кнопки — поруч. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .route-panel,
+  .route-delete-panel {
+    left: calc(var(--safe-left) + var(--gap));
+    width: auto;
+  }
+
+  .route-actions {
+    flex-direction: row;
+  }
+
+  .route-list {
+    max-height: 40vh;
+  }
+}
+
+/* iPhone горизонтально: компактніше, підказка коротка. */
+@media (max-height: 500px) {
+  .route-panel,
+  .route-delete-panel {
+    width: 300px;
+    max-height: calc(100% - var(--safe-top) - 2 * var(--gap) - 52px);
+    overflow-y: auto;
+    padding: 8px 12px;
+  }
+
+  .route-panel .ruler-text,
+  .route-panel .ruler-sub {
+    font-size: 13px;
+  }
+
+  /* Поки тягнуть точку, місця мало: підказку видно в редакторі («Відрізок: …»). */
+  .is-editing-point .route-panel .route-text {
+    display: none;
+  }
+
+  .route-actions {
+    flex-direction: row;
+    margin-top: 6px;
+  }
+
+  .route-actions .panel-button {
+    font-size: 13px;
+  }
+
+  .route-list {
+    max-height: 45vh;
+  }
+}

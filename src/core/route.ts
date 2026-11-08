@@ -168,3 +168,14 @@ export function stepAlongSegment(
 export function lockedAxis(anchor: P3, point: P3): NudgeAxis | null {
   return segmentAxis(anchor, point, SNAP);
 }
+
+/** «1 точка», «3 точки», «5 точок», «11 точок», «21 точка» — українські форми множини. */
+export function formatPointCount(count: number): string {
+  const n = Math.abs(Math.trunc(count));
+  const last = n % 10;
+  const lastTwo = n % 100;
+  let word = 'точок';
+  if (last === 1 && lastTwo !== 11) word = 'точка';
+  else if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) word = 'точки';
+  return `${n} ${word}`;
+}
