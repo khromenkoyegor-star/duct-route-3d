@@ -243,7 +243,9 @@ test.describe('Етап 0: сцена — поведінка', () => {
     await page.mouse.down();
     await page.mouse.move(cx + box.width * 0.3, cy, { steps: 4 }); // швидкий «кидок»
     await page.mouse.up();
-    await waitForIdle(page, 6_000);
+    // Інерція згасає за кадрами; у CI (WebKit без відеокарти) ≈ 10 кадрів/с — даємо більше часу.
+    // На iPad/iPhone (60–120 кадрів/с) це частки секунди.
+    await waitForIdle(page, 10_000);
     const frames = await frameCount(page);
     await page.waitForTimeout(1_000);
     expect(await frameCount(page)).toBe(frames);

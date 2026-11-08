@@ -50,7 +50,19 @@ export function detectDeviceClass(): DeviceClass {
 export function createApp(root: HTMLElement, viewer: Viewer): App {
   const device = detectDeviceClass();
   let scan: LoadedScan | null = null;
-  const state: AppState = { status: 'idle', scanName: null, scanInfo: null, ruler: { active: false, points: [], distanceMm: null }, error: null };
+  const state: AppState = {
+    status: 'idle',
+    scanName: null,
+    scanInfo: null,
+    ruler: {
+      active: false,
+      phase: 'pickA',
+      points: [],
+      distanceMm: null,
+      editor: { active: false, label: null, point: null, origin: null, axis: null, moved: false },
+    },
+    error: null,
+  };
 
   // Вибір файлу. Без жорсткого accept: на iOS він може зробити .glb/.gltf/.zip неактивними —
   // тип перевіряємо після вибору (scan-loader).
@@ -70,12 +82,16 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       state.ruler = rulerState;
     },
     onDone: () => setRuler(false),
+    // Поки точку доводять, розкладка звільняє місце для джойстика (див. style.css).
+    onEditingChange: (editing) => root.classList.toggle('is-editing-point', editing),
   });
 
   const toolbar = createToolbar({
     onOpen: () => input.click(),
     onShowAll: () => viewer.showAll('current'),
     onRuler: () => {
+      // Другий дотик подвійного натискання «Підтвердити точку» міг упасти на цю кнопку.
+      if (ruler.recentlyConfirmed()) return;
       setRuler(!ruler.state.active);
     },
   });
@@ -86,7 +102,18 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     root.classList.toggle('is-ruler', active);
   }
 
-  root.append(ruler.overlay, title.element, toolbar.element, ruler.panel, legend, progress.element, alert.element, input);
+  root.append(
+    ruler.overlay,
+    ruler.editorOverlay,
+    title.element,
+    toolbar.element,
+    ruler.panel,
+    legend,
+    ruler.editor,
+    progress.element,
+    alert.element,
+    input,
+  );
 
   async function openFiles(files: readonly ScanFile[]): Promise<void> {
     if (files.length === 0 || state.status === 'loading') return;
@@ -123,12 +150,19 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       title.showScan(null, null);
       toolbar.setScanLoaded(false);
 
-      // 3. Будуємо 3D.
+      // 3. Будуємо 3D. Скан стає «відкритим» лише коли все вдалося — інакше звільняємо його.
       const loaded = await buildScan(prepared, { maxTextureSide: MAX_TEXTURE_SIDE[device], onPhase: showPhase });
+      let info: ScanInfo;
+      try {
+        info = describeScan(loaded.stats, device);
+        viewer.setScan(loaded.root);
+        viewer.showAll('default');
+      } catch (error) {
+        viewer.setScan(null);
+        loaded.dispose();
+        throw error;
+      }
       scan = loaded;
-      viewer.setScan(loaded.root);
-      viewer.showAll('default');
-      const info = describeScan(loaded.stats, device);
       state.scanName = loaded.name;
       state.scanInfo = info;
       state.status = 'ready';
@@ -136,7 +170,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       toolbar.setScanLoaded(true);
     } catch (error) {
       console.error(error);
-      if (closedPrevious || !scan) state.status = 'idle';
+      // Що б не сталося — стан не лишається «відкривається»: є скан — готово, немає — порожньо.
+      state.status = scan ? 'ready' : 'idle';
       let message =
         error instanceof ScanLoadError
           ? error.message

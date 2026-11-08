@@ -36,8 +36,17 @@ const state = (page: Page) => page.evaluate(() => JSON.parse(JSON.stringify(wind
 
 /** Камера всередині/перед кімнатою так, щоб обидві бічні стіни було видно зсередини (на будь-якому екрані). */
 async function lookIntoRoom(page: Page): Promise<void> {
-  await page.evaluate(() => window.__trasa!.viewer.setView({ x: 0, y: 1.5, z: 14 }, { x: 0, y: 1.2, z: 0 }));
+  // Камера на осі кімнати, трохи згори: обидві бічні стіни видно зсередини, а точки на висоті 1,2 м —
+  // у верхній половині кадру, тож панель джойстика їх не закриває (на всіх пристроях).
+  await page.evaluate(() => window.__trasa!.viewer.setView({ x: 0, y: 1.5, z: 10 }, { x: 0, y: 0, z: 0 }));
   await page.waitForTimeout(100);
+}
+
+/** Натиснути «Підтвердити точку». */
+async function confirmPoint(page: Page): Promise<void> {
+  await page.getByTestId('confirm-point').click();
+  // Після підтвердження ~0,35 с дотики ігноруються (захист від подвійного натискання).
+  await page.waitForTimeout(400);
 }
 
 const project = (page: Page, p: { x: number; y: number; z: number }) =>
@@ -60,6 +69,7 @@ test.describe('Етап 1: відкриття скану', () => {
     await expect(page.getByTestId('scan-name')).toHaveText('room-4000x2700x3000.zip');
     await expect(page.getByTestId('scan-size')).toHaveText(/^Габарит: X 4\s000 · Y 2\s700 · Z 3\s000 мм$/);
     await expect(page.getByTestId('scan-stats')).toContainText('12 трикутників');
+    await expect(page.getByTestId('scan-offset')).toHaveText('Низ скану на Y = 0');
     await expect(page.getByTestId('scan-warnings')).toBeHidden();
     await expect(page.getByTestId('ruler')).toBeEnabled();
     expect(errors).toEqual([]);
@@ -73,6 +83,28 @@ test.describe('Етап 1: відкриття скану', () => {
       return { min: b.min.toArray(), max: b.max.toArray() };
     });
     const expected = { min: [-2, 0, -1.5], max: [2, 2.7, 1.5] };
+    for (let i = 0; i < 3; i++) {
+      expect(Math.abs(box.min[i]! - expected.min[i]!)).toBeLessThan(1e-4);
+      expect(Math.abs(box.max[i]! - expected.max[i]!)).toBeLessThan(1e-4);
+    }
+  });
+
+  test('низ скану стає на Y = 0: підлога на −1 400 мм → піднято на 1 400 мм, габарит той самий', async ({ page }) => {
+    const { buildGlb, boxRoom } = await import('../fixtures/gltf-builder.ts');
+    const glb = buildGlb({ meshes: [boxRoom([-2, 0, -1.5], [2, 2.7, 1.5])], root: { translation: [0.3, -1.4, -0.2] } });
+    await openApp(page);
+    await chooseFiles(page, { name: 'polycam-like.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from(glb) });
+    const s = await state(page);
+    expect(s.error).toBeNull();
+    expect(Math.abs(s.scanInfo.offsetYMm - 1400)).toBeLessThan(0.1);
+    expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
+    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · скан піднято на 1\s400 мм$/);
+    const box = await page.evaluate(() => {
+      const b = window.__trasa!.viewer.scanBox()!;
+      return { min: b.min.toArray(), max: b.max.toArray() };
+    });
+    // X і Z — як у файлі; по висоті — від 0.
+    const expected = { min: [-1.7, 0, -1.7], max: [2.3, 2.7, 1.3] };
     for (let i = 0; i < 3; i++) {
       expect(Math.abs(box.min[i]! - expected.min[i]!)).toBeLessThan(1e-4);
       expect(Math.abs(box.max[i]! - expected.max[i]!)).toBeLessThan(1e-4);
@@ -231,10 +263,10 @@ test.describe('Етап 1: «Рулетка»', () => {
     await lookIntoRoom(page);
     await page.getByTestId('ruler').click();
     await expect(page.getByTestId('ruler-panel')).toBeVisible();
-    await expect(page.getByTestId('ruler-text')).toHaveText('Торкніться першої точки на скані');
+    await expect(page.getByTestId('ruler-text')).toHaveText('Торкніться першої точки (А) на скані');
   }
 
-  test('між протилежними стінами — 4000 мм (±1 мм)', async ({ page }) => {
+  test('між протилежними стінами — 4000 мм (±1 мм): А → підтвердити → Б → підтвердити', async ({ page }) => {
     await startRuler(page);
     // WebKit округлює координати кліку до цілих пікселів, а стіни видно під кутом —
     // тож клікаємо в цілі пікселі строго симетрично відносно центру (камера на осі кімнати).
@@ -243,12 +275,21 @@ test.describe('Етап 1: «Рулетка»', () => {
     const ax = Math.round(a.x);
     const y = Math.round(a.y);
     await page.mouse.click(ax, y);
-    await expect(page.getByTestId('ruler-text')).toHaveText('Тепер — другої точки');
+    await expect(page.getByTestId('point-editor')).toBeVisible();
+    await expect(page.getByTestId('ruler-text')).toHaveText(/^Точка А:/);
+    await confirmPoint(page);
+    await expect(page.getByTestId('point-editor')).toBeHidden();
+    await expect(page.getByTestId('ruler-text')).toHaveText('Тепер торкніться другої точки (Б)');
     await page.mouse.click(2 * cx - ax, y);
+    // Поки Б доводять — відстань уже видно.
+    expect(Math.abs((await state(page)).ruler.distanceMm - 4000)).toBeLessThanOrEqual(1);
+    await confirmPoint(page);
     const s = await state(page);
+    expect(s.ruler.phase).toBe('done');
     expect(s.ruler.points).toHaveLength(2);
     expect(Math.abs(s.ruler.distanceMm - 4000)).toBeLessThanOrEqual(1);
     await expect(page.getByTestId('ruler-text')).toHaveText(/^4\s000 мм$/);
+    await expect(page.getByTestId('ruler-sub')).toHaveText('Торкніться скану, щоб почати новий вимір');
   });
 
   test('підлога — стеля: 2700 мм (±1 мм), дотиком пальця на сенсорних пристроях', async ({ page }, testInfo) => {
@@ -262,7 +303,11 @@ test.describe('Етап 1: «Рулетка»', () => {
       return testInfo.project.use.hasTouch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y);
     };
     await tap(await project(page, { x: 0.5, y: 0, z: -1 }));
+    await confirmPoint(page);
+    // Якщо панель закривала точку, камера повернулась до неї — повертаємо погляд, як зробила б людина.
+    await page.evaluate(() => window.__trasa!.viewer.setView({ x: 0.5, y: 1.35, z: 6 }, { x: 0.5, y: 1.35, z: -1 }));
     await tap(await project(page, { x: 0.5, y: 2.7, z: -1 }));
+    await confirmPoint(page);
     const s = await state(page);
     expect(s.ruler.points).toHaveLength(2);
     // Обидві точки на одній вертикалі — відстань = висота кімнати.
@@ -284,28 +329,44 @@ test.describe('Етап 1: «Рулетка»', () => {
     expect(Math.abs(after.x - before.x) + Math.abs(after.y - before.y)).toBeGreaterThan(5);
   });
 
-  test('дотик повз скан — підказка; третій дотик починає новий вимір; вихід скидає', async ({ page }) => {
+  test('промах — підказка; дотик до підтвердження переставляє точку; після виміру — новий вимір; вихід скидає', async ({
+    page,
+  }) => {
     await startRuler(page);
     const sky = await project(page, { x: 0, y: 3.5, z: 0 }); // над стелею — поверхні немає
     await page.mouse.click(sky.x, sky.y);
     await expect(page.getByTestId('ruler-sub')).toHaveText(/немає поверхні скану/);
     expect((await state(page)).ruler.points).toHaveLength(0);
 
-    for (const p of [
-      { x: -2, y: 1.2, z: 0 },
-      { x: 2, y: 1.2, z: 0 },
-      { x: 0, y: 0, z: 0.5 },
-    ]) {
+    const click = async (p: { x: number; y: number; z: number }) => {
       const s = await project(page, p);
-      await page.mouse.click(s.x, s.y);
-    }
-    const s = await state(page);
+      await page.mouse.click(Math.round(s.x), Math.round(s.y));
+    };
+    // А поставили, передумали — новий дотик переставляє А (а не ставить Б).
+    await click({ x: -2, y: 1.2, z: 0 });
+    await click({ x: -2, y: 0.8, z: 0.4 });
+    let s = await state(page);
+    expect(s.ruler.phase).toBe('editA');
+    expect(s.ruler.points).toHaveLength(1);
+    expect(s.ruler.points[0].y).toBeCloseTo(0.8, 1);
+    await confirmPoint(page);
+    // Камера могла повернутись до точки А (якщо її закрила панель) — дивимось на кімнату знову.
+    await lookIntoRoom(page);
+    await click({ x: 2, y: 1.2, z: 0 });
+    await confirmPoint(page);
+    expect((await state(page)).ruler.phase).toBe('done');
+    await lookIntoRoom(page);
+    // Після виміру дотик починає новий вимір.
+    await click({ x: 0, y: 0, z: 0.5 });
+    s = await state(page);
+    expect(s.ruler.phase).toBe('editA');
     expect(s.ruler.points).toHaveLength(1);
     expect(s.ruler.distanceMm).toBeNull();
 
     await page.getByTestId('ruler-done').click();
     await expect(page.getByTestId('ruler-panel')).toBeHidden();
-    expect((await state(page)).ruler).toMatchObject({ active: false, points: [] });
+    await expect(page.getByTestId('point-editor')).toBeHidden();
+    expect((await state(page)).ruler).toMatchObject({ active: false, points: [], phase: 'pickA' });
     await expect(page.getByTestId('ruler')).toHaveAttribute('aria-pressed', 'false');
   });
 
@@ -380,6 +441,11 @@ test.describe('Скріншоти етапу 1', () => {
         ]) {
           const s = await project(page, p);
           await page.mouse.click(s.x, s.y);
+          await page.waitForTimeout(150);
+          if (p.x > 0) {
+            await page.screenshot({ path: `test-results/screenshots/stage1-${safeName}-${colorScheme}-editing.png` });
+          }
+          await confirmPoint(page);
         }
         await page.waitForTimeout(200);
         await page.screenshot({ path: `test-results/screenshots/stage1-${safeName}-${colorScheme}-ruler.png` });

@@ -615,10 +615,25 @@ describe('дивні архіви й файли', () => {
 });
 
 describe('габарит і масштаб: як у файлі, точно до 0,1 мм', () => {
-  it('скан зсунутий від нуля — не центрується й не переноситься', async () => {
+  it('скан зсунутий від нуля: X і Z — як у файлі, по висоті низ стає на Y = 0', async () => {
     const glb = buildGlb({ meshes: [room()], root: { translation: [50, 1.25, -30] } });
     const scan = await loadScan([file('far.glb', glb)], TABLET);
-    expectStatsBox(scan.stats, [48, 1.25, -31.5], [52, 3.95, -28.5]);
+    expectStatsBox(scan.stats, [48, 0, -31.5], [52, 2.7, -28.5]);
+    expect(scan.stats.offsetY).toBeCloseTo(-1.25, 9);
+    scan.dispose();
+  });
+
+  it('підлога на −1,4 м (нуль Polycam — там, де був телефон) → низ на Y = 0, габарит той самий', async () => {
+    const glb = buildGlb({ meshes: [room()], root: { translation: [0, -1.4, 0] } });
+    const scan = await loadScan([file('polycam-like.glb', glb)], TABLET);
+    expectStatsBox(scan.stats, [-2, 0, -1.5], [2, 2.7, 1.5]);
+    expect(scan.stats.offsetY).toBeCloseTo(1.4, 9);
+    // Сам вміст скану не змінено: зсунута лише обгортка.
+    expect(scan.root.position.y).toBeCloseTo(1.4, 9);
+    expect(scan.root.scale.toArray()).toEqual([1, 1, 1]);
+    expect(scan.root.quaternion.toArray()).toEqual([0, 0, 0, 1]);
+    expect(scan.root.position.x).toBe(0);
+    expect(scan.root.position.z).toBe(0);
     scan.dispose();
   });
 

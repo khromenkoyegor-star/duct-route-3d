@@ -58,6 +58,11 @@ export interface Viewer {
   projectAxes(): Record<'origin' | AxisName, ScreenPoint>;
   /** Точка сцени (м) → екран (CSS px); visible = перед камерою. */
   projectPoint(point: Vec3Like): ScreenPoint & { visible: boolean };
+  /**
+   * Куди на екрані дивляться осі +X, +Y, +Z біля точки (вектори в CSS px; довжина — для 1/10
+   * відстані до камери). Нульовий вектор — вісь за камерою. Для джойстика і стрілок осей.
+   */
+  screenAxes(point: Vec3Like): Record<'X' | 'Y' | 'Z', ScreenPoint>;
   /** Показати скан (null — прибрати). Звільнення пам'яті — справа того, хто завантажив. */
   setScan(root: Object3D | null): void;
   /** Межі скану в метрах або null, якщо скану немає. */
@@ -68,6 +73,11 @@ export interface Viewer {
   raycastScan(clientX: number, clientY: number): Vector3 | null;
   /** Поставити камеру: звідки й куди дивитися (м). */
   setView(position: Vec3Like, target: Vec3Like): void;
+  /**
+   * Повернути камеру на місці так, щоб точка опинилась у центрі кадру або в заданому місці
+   * екрана `at` (CSS px) — наприклад, у вільній від панелей частині. Камера не рухається.
+   */
+  centerOn(point: Vec3Like, at?: ScreenPoint): void;
   /** Запам'ятати положення камери (наприклад, у момент натискання). */
   snapshotView(): ViewSnapshot;
   /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
@@ -253,10 +263,11 @@ export function createViewer(container: HTMLElement): Viewer {
 
   /**
    * Інерція згасає плавно, але її «хвіст» — десятки кадрів, де камера зсувається менше ніж на піксель.
-   * Коли рух за кадр стає таким (кут < 1e-4 рад ≈ 0,1 px на iPad), зупиняємо інерцію одразу:
-   * на око різниці немає, а відеокарта й батарея відпочивають.
+   * Коли рух за кадр стає таким (кут < 3e-4 рад ≈ 0,3 px на iPad), зупиняємо інерцію одразу:
+   * на око різниці немає, а відеокарта й батарея відпочивають. Інерція OrbitControls згасає
+   * за кадрами, тож на повільних пристроях без цього вона тягнулася б секундами.
    */
-  const INERTIA_STOP_STEP = 1e-4;
+  const INERTIA_STOP_STEP = 3e-4;
   const lastPosition = new Vector3();
   const lastQuaternion = new Quaternion();
 
@@ -310,6 +321,16 @@ export function createViewer(container: HTMLElement): Viewer {
       };
     },
     projectPoint,
+    screenAxes(point) {
+      const base = new Vector3(point.x, point.y, point.z);
+      const length = Math.max(camera.position.distanceTo(base) * 0.1, 0.001);
+      const origin = projectPoint(base);
+      const along = (dx: number, dy: number, dz: number): ScreenPoint => {
+        const tip = projectPoint({ x: base.x + dx * length, y: base.y + dy * length, z: base.z + dz * length });
+        return tip.visible && origin.visible ? { x: tip.x - origin.x, y: tip.y - origin.y } : { x: 0, y: 0 };
+      };
+      return { X: along(1, 0, 0), Y: along(0, 1, 0), Z: along(0, 0, 1) };
+    },
     setScan(root) {
       scanGroup.clear();
       cachedScanBox = null;
@@ -342,6 +363,31 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.target.copy(snapshot.target);
       camera.position.copy(snapshot.position);
       camera.lookAt(controls.target);
+      controls.update();
+      requestRender();
+    },
+    centerOn(point, at) {
+      // Камера лишається на місці й лише повертається («як голова») — так вона ніколи не пройде
+      // крізь підлогу чи стіну, на відміну від зсуву.
+      flushInertia();
+      const p = new Vector3(point.x, point.y, point.z);
+      const distance = Math.max(camera.position.distanceTo(p), 0.01);
+      camera.lookAt(p);
+      if (at) {
+        const rect = canvas.getBoundingClientRect();
+        const nx = (at.x - (rect.left + rect.width / 2)) / (rect.width / 2);
+        const ny = -(at.y - (rect.top + rect.height / 2)) / (rect.height / 2);
+        const tanV = Math.tan((camera.fov * Math.PI) / 360);
+        const tanH = tanV * camera.aspect;
+        // Щоб точка опинилась праворуч від центру — камера повертається вліво (навколо вертикалі),
+        // щоб вище центру — нахиляється вниз (навколо своєї горизонтальної осі).
+        camera.rotateOnWorldAxis(new Vector3(0, 1, 0), Math.atan(nx * tanH));
+        camera.rotateX(-Math.atan(ny * tanV));
+      }
+      camera.updateMatrixWorld();
+      const forward = new Vector3();
+      camera.getWorldDirection(forward);
+      controls.target.copy(camera.position).addScaledVector(forward, distance);
       controls.update();
       requestRender();
     },
