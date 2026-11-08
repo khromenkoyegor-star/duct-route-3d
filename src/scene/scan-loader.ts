@@ -5,7 +5,7 @@
 import {
   Box3,
   type BufferGeometry,
-  type Group,
+  Group,
   LoadingManager,
   type Material,
   Mesh,
@@ -298,7 +298,7 @@ async function limitTextures(root: Object3D, maxSide: number): Promise<number> {
 }
 
 /** Статистика для панелі інформації: межі (м), трикутники, текстури. */
-function collectStats(root: Object3D, fileBytes: number, texturesReduced: number): ScanStats {
+function collectStats(root: Object3D, fileBytes: number, texturesReduced: number, offsetY: number): ScanStats {
   root.updateMatrixWorld(true);
   // precise: межі за справжніми вершинами (інакше повернутий вузол дає завищений габарит).
   const box = new Box3().setFromObject(root, true);
@@ -326,7 +326,24 @@ function collectStats(root: Object3D, fileBytes: number, texturesReduced: number
     textures: textures.size,
     texturePixels,
     texturesReduced,
+    offsetY,
   };
+}
+
+/**
+ * Найнижча точка скану → Y = 0 (Polycam ставить нуль висоти там, де був телефон на початку сканування).
+ * Скан загортаємо в групу й зсуваємо тільки її по Y: масштаб, осі, X і Z не змінюються.
+ */
+function placeBottomAtZero(content: Group): { wrapper: Group; offsetY: number } {
+  content.updateMatrixWorld(true);
+  const box = new Box3().setFromObject(content, true);
+  const offsetY = box.isEmpty() ? 0 : -box.min.y;
+  const wrapper = new Group();
+  wrapper.name = 'scan';
+  wrapper.add(content);
+  wrapper.position.y = offsetY;
+  wrapper.updateMatrixWorld(true);
+  return { wrapper, offsetY };
 }
 
 /** Перевірений, але ще не побудований скан: файли прочитано, модель знайдено, усі її файли на місці. */
@@ -459,9 +476,9 @@ export async function buildScan(prepared: PreparedScan, options: LoadOptions): P
   try {
     makeUnlit(root);
     const texturesReduced = await limitTextures(root, options.maxTextureSide);
-    const stats = collectStats(root, prepared.fileBytes, texturesReduced);
-    root.name = 'scan';
-    return { name: prepared.name, root, stats, dispose: () => disposeObject(root) };
+    const { wrapper, offsetY } = placeBottomAtZero(root);
+    const stats = collectStats(wrapper, prepared.fileBytes, texturesReduced, offsetY);
+    return { name: prepared.name, root: wrapper, stats, dispose: () => disposeObject(wrapper) };
   } catch (error) {
     disposeObject(root);
     throw error;

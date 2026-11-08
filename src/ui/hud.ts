@@ -1,4 +1,4 @@
-import { formatBytes, formatCount, type ScanInfo } from '../core/scan-info';
+import { formatBytes, formatCount, formatOffsetY, type ScanInfo } from '../core/scan-info';
 import { formatMm } from '../core/units';
 import { createVersionBadge } from './version-badge';
 
@@ -56,10 +56,13 @@ export function createTitle(): TitlePanel {
   const scanStats = document.createElement('p');
   scanStats.className = 'scan-row scan-row--secondary';
   scanStats.dataset.testid = 'scan-stats';
+  const scanOffset = document.createElement('p');
+  scanOffset.className = 'scan-row scan-row--secondary';
+  scanOffset.dataset.testid = 'scan-offset';
   const warnings = document.createElement('ul');
   warnings.className = 'scan-warnings';
   warnings.dataset.testid = 'scan-warnings';
-  scan.append(scanName, scanSize, scanStats, warningSummary, warnings);
+  scan.append(scanName, scanSize, scanOffset, scanStats, warningSummary, warnings);
 
   panel.append(toggle, name, subtitle, scan, createVersionBadge());
 
@@ -89,6 +92,7 @@ export function createTitle(): TitlePanel {
         axis('Z'),
         ` ${n(info.sizeMm.z)} мм`,
       );
+      scanOffset.textContent = formatOffsetY(info.offsetYMm);
       const count = info.warnings.length;
       warningSummary.textContent = `⚠︎ ${count} ${plural(count, 'попередження', 'попередження', 'попереджень')}`;
       warningSummary.hidden = count === 0;

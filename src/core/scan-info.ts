@@ -19,10 +19,17 @@ export interface ScanStats {
   texturePixels: number;
   /** Скільки текстур було зменшено, щоб не перевантажити пам'ять. */
   texturesReduced: number;
+  /**
+   * На скільки скан піднято (+) чи опущено (−) по Y, щоб найнижча точка була на Y = 0 (м).
+   * min/max — уже після цього зсуву.
+   */
+  offsetY: number;
 }
 
 export interface ScanInfo {
   sizeMm: { x: number; y: number; z: number };
+  /** Зсув скану по висоті (мм): + піднято, − опущено. */
+  offsetYMm: number;
   triangles: number;
   fileBytes: number;
   warnings: string[];
@@ -53,6 +60,16 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${countFormat.format(bytes)} Б`;
   if (bytes < 1024 * 1024) return `${countFormat.format(Math.round(bytes / 1024))} КБ`;
   return `${decimalFormat.format(Math.round((bytes / (1024 * 1024)) * 10) / 10)} МБ`;
+}
+
+/**
+ * Підпис зсуву по висоті: «Низ скану на Y = 0 · піднято на 1 400 мм».
+ * Зсув менший за 0,5 мм не згадуємо.
+ */
+export function formatOffsetY(offsetYMm: number): string {
+  if (Math.abs(offsetYMm) < 0.5) return 'Низ скану на Y = 0';
+  const direction = offsetYMm > 0 ? 'піднято' : 'опущено';
+  return `Низ скану на Y = 0 · ${direction} на ${formatMm(Math.abs(offsetYMm))}`;
 }
 
 /** «4 000 × 2 700 × 3 000 мм» (X × Y × Z). */
@@ -87,5 +104,5 @@ export function describeScan(stats: ScanStats, device: DeviceClass): ScanInfo {
   if (stats.triangles === 0) {
     warnings.push('У файлі немає поверхонь — це не скан приміщення?');
   }
-  return { sizeMm, triangles: stats.triangles, fileBytes: stats.fileBytes, warnings };
+  return { sizeMm, offsetYMm: mToMm(stats.offsetY), triangles: stats.triangles, fileBytes: stats.fileBytes, warnings };
 }

@@ -11,7 +11,14 @@ import {
   resolveUri,
   unsupportedRequiredExtensions,
 } from '../../src/core/scan-files.ts';
-import { describeScan, formatBytes, formatCount, formatSizeMm, type ScanStats } from '../../src/core/scan-info.ts';
+import {
+  describeScan,
+  formatBytes,
+  formatCount,
+  formatOffsetY,
+  formatSizeMm,
+  type ScanStats,
+} from '../../src/core/scan-info.ts';
 
 const bytes = (...b: number[]) => new Uint8Array(b);
 const text = (s: string) => new TextEncoder().encode(s);
@@ -104,6 +111,7 @@ describe('інформація про скан', () => {
     textures: 1,
     texturePixels: 64 * 64,
     texturesReduced: 0,
+    offsetY: 0,
   };
 
   it('габарит тестової кімнати — 4000 × 2700 × 3000 мм', () => {
@@ -130,6 +138,14 @@ describe('інформація про скан', () => {
   it('зменшені текстури й порожній файл — пояснення', () => {
     expect(describeScan({ ...room, texturesReduced: 2 }, 'phone').warnings[0]).toMatch(/Текстури зменшено \(2\)/);
     expect(describeScan({ ...room, triangles: 0 }, 'phone').warnings[0]).toMatch(/немає поверхонь/);
+  });
+
+  it('зсув по висоті: у мм, зі знаком, зрозумілим підписом', () => {
+    expect(describeScan({ ...room, offsetY: 1.4 }, 'tablet').offsetYMm).toBeCloseTo(1400, 9);
+    expect(plain(formatOffsetY(1400))).toBe('Низ скану на Y = 0 · піднято на 1 400 мм');
+    expect(plain(formatOffsetY(-250.04))).toBe('Низ скану на Y = 0 · опущено на 250 мм');
+    expect(formatOffsetY(0.2)).toBe('Низ скану на Y = 0');
+    expect(formatOffsetY(-0)).toBe('Низ скану на Y = 0');
   });
 
   it('формати чисел', () => {

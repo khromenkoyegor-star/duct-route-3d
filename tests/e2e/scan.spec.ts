@@ -60,6 +60,7 @@ test.describe('Етап 1: відкриття скану', () => {
     await expect(page.getByTestId('scan-name')).toHaveText('room-4000x2700x3000.zip');
     await expect(page.getByTestId('scan-size')).toHaveText(/^Габарит: X 4\s000 · Y 2\s700 · Z 3\s000 мм$/);
     await expect(page.getByTestId('scan-stats')).toContainText('12 трикутників');
+    await expect(page.getByTestId('scan-offset')).toHaveText('Низ скану на Y = 0');
     await expect(page.getByTestId('scan-warnings')).toBeHidden();
     await expect(page.getByTestId('ruler')).toBeEnabled();
     expect(errors).toEqual([]);
@@ -73,6 +74,28 @@ test.describe('Етап 1: відкриття скану', () => {
       return { min: b.min.toArray(), max: b.max.toArray() };
     });
     const expected = { min: [-2, 0, -1.5], max: [2, 2.7, 1.5] };
+    for (let i = 0; i < 3; i++) {
+      expect(Math.abs(box.min[i]! - expected.min[i]!)).toBeLessThan(1e-4);
+      expect(Math.abs(box.max[i]! - expected.max[i]!)).toBeLessThan(1e-4);
+    }
+  });
+
+  test('низ скану стає на Y = 0: підлога на −1 400 мм → піднято на 1 400 мм, габарит той самий', async ({ page }) => {
+    const { buildGlb, boxRoom } = await import('../fixtures/gltf-builder.ts');
+    const glb = buildGlb({ meshes: [boxRoom([-2, 0, -1.5], [2, 2.7, 1.5])], root: { translation: [0.3, -1.4, -0.2] } });
+    await openApp(page);
+    await chooseFiles(page, { name: 'polycam-like.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from(glb) });
+    const s = await state(page);
+    expect(s.error).toBeNull();
+    expect(Math.abs(s.scanInfo.offsetYMm - 1400)).toBeLessThan(0.1);
+    expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
+    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · піднято на 1\s400 мм$/);
+    const box = await page.evaluate(() => {
+      const b = window.__trasa!.viewer.scanBox()!;
+      return { min: b.min.toArray(), max: b.max.toArray() };
+    });
+    // X і Z — як у файлі; по висоті — від 0.
+    const expected = { min: [-1.7, 0, -1.7], max: [2.3, 2.7, 1.3] };
     for (let i = 0; i < 3; i++) {
       expect(Math.abs(box.min[i]! - expected.min[i]!)).toBeLessThan(1e-4);
       expect(Math.abs(box.max[i]! - expected.max[i]!)).toBeLessThan(1e-4);
