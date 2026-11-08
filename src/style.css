@@ -1,0 +1,211 @@
+/* Траса 3D — базові стилі. Вигляд iPadOS/iOS: системний шрифт, «скляні» панелі, світла й темна тема. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f2f2f7;
+  --label: #000000;
+  --label-secondary: rgba(60, 60, 67, 0.75);
+  --panel-bg: rgba(255, 255, 255, 0.72);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --panel-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --axis-x: #ff3b30;
+  --axis-y: #34c759;
+  --axis-z: #007aff;
+  --gap: 12px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --label: #ffffff;
+    --label-secondary: rgba(235, 235, 245, 0.7);
+    --panel-bg: rgba(28, 28, 30, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.1);
+    --panel-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    --axis-x: #ff453a;
+    --axis-y: #30d158;
+    --axis-z: #0a84ff;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Без «пружинення» сторінки й системного зуму: усі жести належать 3D-сцені. */
+  overscroll-behavior: none;
+  touch-action: none;
+  background: var(--bg);
+  color: var(--label);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.3;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+/* Сцена — на весь екран, під вирізом і «острівцем» теж (viewport-fit=cover). */
+.stage {
+  position: absolute;
+  inset: 0;
+}
+
+.viewport {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+
+/* «Скляна» панель у стилі iPadOS. Панелі етапу 0 лише показують інформацію,
+   тому пропускають жести до сцени. */
+.panel {
+  position: absolute;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  border: 0.5px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  pointer-events: none;
+}
+
+.title-panel {
+  top: calc(var(--safe-top) + var(--gap));
+  left: calc(var(--safe-left) + var(--gap));
+  max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 15px;
+  color: var(--label-secondary);
+}
+
+.legend-panel {
+  left: calc(var(--safe-left) + var(--gap));
+  bottom: calc(var(--safe-bottom) + var(--gap));
+  max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+}
+
+.legend-row {
+  margin: 0;
+  font-size: 15px;
+}
+
+.legend-axes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 4px;
+}
+
+.legend-axis {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dot-x {
+  background: var(--axis-x);
+}
+
+.dot-y {
+  background: var(--axis-y);
+}
+
+.dot-z {
+  background: var(--axis-z);
+}
+
+.version-badge {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Якщо 3D не запустилось — версія окремо внизу. */
+.version-badge--floating {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--safe-bottom) + var(--gap));
+  text-align: center;
+}
+
+.fatal {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 24px) calc(var(--safe-right) + 24px) calc(var(--safe-bottom) + 24px)
+    calc(var(--safe-left) + 24px);
+  font-size: 17px;
+  text-align: center;
+}
+
+/* Низький екран (iPhone горизонтально): компактні панелі, більше місця сцені. */
+@media (max-height: 500px) {
+  .panel {
+    padding: 8px 12px;
+  }
+
+  .subtitle {
+    display: none;
+  }
+
+  .legend-panel {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .legend-axes {
+    margin-top: 0;
+  }
+}
