@@ -96,7 +96,7 @@ test.describe('Етап 1: відкриття скану', () => {
     expect(s.error).toBeNull();
     expect(Math.abs(s.scanInfo.offsetYMm - 1400)).toBeLessThan(0.1);
     expect(Math.abs(s.scanInfo.sizeMm.y - 2700)).toBeLessThan(0.1);
-    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · піднято на 1\s400 мм$/);
+    await expect(page.getByTestId('scan-offset')).toHaveText(/^Низ скану на Y = 0 · скан піднято на 1\s400 мм$/);
     const box = await page.evaluate(() => {
       const b = window.__trasa!.viewer.scanBox()!;
       return { min: b.min.toArray(), max: b.max.toArray() };
@@ -302,7 +302,8 @@ test.describe('Етап 1: «Рулетка»', () => {
     };
     await tap(await project(page, { x: 0.5, y: 0, z: -1 }));
     await confirmPoint(page);
-    // Камера могла зсунутися до точки (якщо її закрила панель) — рахуємо проєкцію заново.
+    // Якщо панель закривала точку, камера повернулась до неї — повертаємо погляд, як зробила б людина.
+    await page.evaluate(() => window.__trasa!.viewer.setView({ x: 0.5, y: 1.35, z: 6 }, { x: 0.5, y: 1.35, z: -1 }));
     await tap(await project(page, { x: 0.5, y: 2.7, z: -1 }));
     await confirmPoint(page);
     const s = await state(page);
@@ -347,9 +348,12 @@ test.describe('Етап 1: «Рулетка»', () => {
     expect(s.ruler.points).toHaveLength(1);
     expect(s.ruler.points[0].y).toBeCloseTo(0.8, 1);
     await confirmPoint(page);
+    // Камера могла повернутись до точки А (якщо її закрила панель) — дивимось на кімнату знову.
+    await lookIntoRoom(page);
     await click({ x: 2, y: 1.2, z: 0 });
     await confirmPoint(page);
     expect((await state(page)).ruler.phase).toBe('done');
+    await lookIntoRoom(page);
     // Після виміру дотик починає новий вимір.
     await click({ x: 0, y: 0, z: 0.5 });
     s = await state(page);

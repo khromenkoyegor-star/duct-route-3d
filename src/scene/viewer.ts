@@ -73,8 +73,11 @@ export interface Viewer {
   raycastScan(clientX: number, clientY: number): Vector3 | null;
   /** Поставити камеру: звідки й куди дивитися (м). */
   setView(position: Vec3Like, target: Vec3Like): void;
-  /** Зсунути камеру (без повороту й зміни відстані) так, щоб точка була в центрі кадру. */
-  centerOn(point: Vec3Like): void;
+  /**
+   * Повернути камеру на місці так, щоб точка опинилась у центрі кадру або в заданому місці
+   * екрана `at` (CSS px) — наприклад, у вільній від панелей частині. Камера не рухається.
+   */
+  centerOn(point: Vec3Like, at?: ScreenPoint): void;
   /** Запам'ятати положення камери (наприклад, у момент натискання). */
   snapshotView(): ViewSnapshot;
   /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
@@ -362,11 +365,28 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.update();
       requestRender();
     },
-    centerOn(point) {
+    centerOn(point, at) {
+      // Камера лишається на місці й лише повертається («як голова») — так вона ніколи не пройде
+      // крізь підлогу чи стіну, на відміну від зсуву.
       flushInertia();
-      const offset = camera.position.clone().sub(controls.target);
-      controls.target.set(point.x, point.y, point.z);
-      camera.position.copy(controls.target).add(offset);
+      const p = new Vector3(point.x, point.y, point.z);
+      const distance = Math.max(camera.position.distanceTo(p), 0.01);
+      camera.lookAt(p);
+      if (at) {
+        const rect = canvas.getBoundingClientRect();
+        const nx = (at.x - (rect.left + rect.width / 2)) / (rect.width / 2);
+        const ny = -(at.y - (rect.top + rect.height / 2)) / (rect.height / 2);
+        const tanV = Math.tan((camera.fov * Math.PI) / 360);
+        const tanH = tanV * camera.aspect;
+        // Щоб точка опинилась праворуч від центру — камера повертається вліво (навколо вертикалі),
+        // щоб вище центру — нахиляється вниз (навколо своєї горизонтальної осі).
+        camera.rotateOnWorldAxis(new Vector3(0, 1, 0), Math.atan(nx * tanH));
+        camera.rotateX(-Math.atan(ny * tanV));
+      }
+      camera.updateMatrixWorld();
+      const forward = new Vector3();
+      camera.getWorldDirection(forward);
+      controls.target.copy(camera.position).addScaledVector(forward, distance);
       controls.update();
       requestRender();
     },

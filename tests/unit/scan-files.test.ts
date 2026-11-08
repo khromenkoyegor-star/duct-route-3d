@@ -142,8 +142,8 @@ describe('інформація про скан', () => {
 
   it('зсув по висоті: у мм, зі знаком, зрозумілим підписом', () => {
     expect(describeScan({ ...room, offsetY: 1.4 }, 'tablet').offsetYMm).toBeCloseTo(1400, 9);
-    expect(plain(formatOffsetY(1400))).toBe('Низ скану на Y = 0 · піднято на 1 400 мм');
-    expect(plain(formatOffsetY(-250.04))).toBe('Низ скану на Y = 0 · опущено на 250 мм');
+    expect(plain(formatOffsetY(1400))).toBe('Низ скану на Y = 0 · скан піднято на 1 400 мм');
+    expect(plain(formatOffsetY(-250.04))).toBe('Низ скану на Y = 0 · скан опущено на 250 мм');
     expect(formatOffsetY(0.2)).toBe('Низ скану на Y = 0');
     expect(formatOffsetY(-0)).toBe('Низ скану на Y = 0');
   });

@@ -2,7 +2,7 @@
  * Точне доведення точки джойстиком: лише по одній осі за раз, швидкість — від сили відхилення.
  *
  * Джойстик (2D) рухає точку по X або Z: вісь вибирається за напрямком на екрані — та,
- * чия стрілка біля точки найближча до напрямку джойстика. Вибрана вісь фіксується до відпускання.
+ * чия стрілка (на джойстику й біля точки) найближча до напрямку руху. Вибрана вісь фіксується до відпускання.
  * Повзунок (1D) рухає точку тільки по Y.
  * Ледь відхилив — 5 мм/с, до краю — 500 мм/с (0,5 м/с), між ними — плавно (експонента).
  *
@@ -24,45 +24,80 @@ export interface PointM {
   z: number;
 }
 
-/** Мертва зона джойстика (частка радіуса): дрібне тремтіння пальця точку не рухає. */
-export const NUDGE_DEAD_ZONE = 0.1;
+/**
+ * Мертва зона джойстика (частка ходу): поки палець не відійшов від місця дотику далі за неї,
+ * точка не рухається і вісь не вибирається (при ході 64 px це ≈ 10 px).
+ */
+export const NUDGE_DEAD_ZONE = 0.15;
 /** Найменша швидкість (одразу за мертвою зоною), мм/с. */
 export const NUDGE_MIN_MM_S = 5;
 /** Найбільша швидкість (джойстик до краю), мм/с. */
 export const NUDGE_MAX_MM_S = 500;
 /** Найдовший крок часу між кадрами, с: після паузи (вкладка у фоні) точка не «стрибає». */
 export const NUDGE_MAX_DT_S = 0.1;
-/** Вісь, коротша на екрані за цю частку від довшої, вважається «дивиться в камеру» і не вибирається. */
+/** Вісь, коротша на екрані за цю частку від довшої, вважається «дивиться в камеру». */
 const DEGENERATE_AXIS_RATIO = 0.15;
+/** Якщо X і Z на екрані розходяться менше ніж на цей кут (рад), на джойстику їх розводимо. */
+const MIN_AXIS_SEPARATION = (35 * Math.PI) / 180;
 
-/** Відхилення 0…1 → швидкість у мм/с (0 у мертвій зоні). */
+/**
+ * Відхилення 0…1 → швидкість у мм/с (0 у мертвій зоні).
+ * Крива пологіша на початку (степінь 1,5): широка зона повільного точного доведення.
+ */
 export function nudgeSpeed(deflection: number): number {
   const d = Math.min(1, Math.abs(deflection));
   if (!(d > NUDGE_DEAD_ZONE)) return 0;
   const t = (d - NUDGE_DEAD_ZONE) / (1 - NUDGE_DEAD_ZONE);
-  return NUDGE_MIN_MM_S * (NUDGE_MAX_MM_S / NUDGE_MIN_MM_S) ** t;
+  return NUDGE_MIN_MM_S * (NUDGE_MAX_MM_S / NUDGE_MIN_MM_S) ** (t ** 1.5);
 }
 
 const length = (v: Vec2) => Math.hypot(v.x, v.y);
+const unit = (v: Vec2): Vec2 => {
+  const l = length(v);
+  return l > 0 ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 };
+};
 
 /**
- * Яка вісь (X чи Z) найкраще збігається на екрані з напрямком джойстика.
- * screen — напрямки +X і +Z біля точки на екрані (будь-якої довжини).
- * null — джойстик у мертвій зоні або обидві осі «дивляться в камеру».
+ * Напрямки X і Z на джойстику (одиничні, екранні: y вниз).
+ * Зазвичай — так, як стрілки X і Z біля точки на екрані. Але якщо на екрані вони майже на одній
+ * лінії (дивимось з кута на рівні очей) або одна з осей «дивиться в камеру», розрізнити їх неможливо.
+ * Тоді довша лишається як є, а коротша отримує перпендикулярний напрямок (у бік її справжньої стрілки),
+ * і джойстик показує це своїми стрілками — обидві осі завжди досяжні.
  */
-export function pickAxis(stick: Vec2, screen: Record<HorizontalAxis, Vec2>): HorizontalAxis | null {
-  const s = length(stick);
-  if (!(s > NUDGE_DEAD_ZONE)) return null;
+export function joystickDirections(screen: Record<HorizontalAxis, Vec2>): Record<HorizontalAxis, Vec2> {
   const lx = length(screen.X);
   const lz = length(screen.Z);
-  const longest = Math.max(lx, lz);
-  if (!(longest > 0)) return null;
+  if (!(Math.max(lx, lz) > 0)) return { X: { x: 1, y: 0 }, Z: { x: 0, y: -1 } };
+  const strong: HorizontalAxis = lx >= lz ? 'X' : 'Z';
+  const weak: HorizontalAxis = strong === 'X' ? 'Z' : 'X';
+  const s = unit(screen[strong]);
+  const w = unit(screen[weak]);
+  const degenerate = length(screen[weak]) < length(screen[strong]) * DEGENERATE_AXIS_RATIO;
+  // Кут між лініями осей (0…90°): напрямок «туди чи назад» не важливий.
+  const separation = Math.acos(Math.min(1, Math.abs(s.x * w.x + s.y * w.y)));
+  if (!degenerate && separation >= MIN_AXIS_SEPARATION) {
+    return strong === 'X' ? { X: s, Z: w } : { X: w, Z: s };
+  }
+  let perp: Vec2 = { x: -s.y, y: s.x };
+  const dot = perp.x * w.x + perp.y * w.y;
+  // У бік справжньої стрілки коротшої осі; якщо вона майже точка — «вгору» на екрані.
+  if (dot < 0 || (Math.abs(dot) < 1e-6 && perp.y > 0)) perp = { x: -perp.x, y: -perp.y };
+  return strong === 'X' ? { X: s, Z: perp } : { X: perp, Z: s };
+}
+
+/**
+ * Яка вісь (X чи Z) найкраще збігається з напрямком джойстика.
+ * dirs — напрямки осей на джойстику (див. joystickDirections). null — джойстик у мертвій зоні.
+ */
+export function pickAxis(stick: Vec2, dirs: Record<HorizontalAxis, Vec2>): HorizontalAxis | null {
+  const s = length(stick);
+  if (!(s > NUDGE_DEAD_ZONE)) return null;
   let best: HorizontalAxis | null = null;
   let bestCos = -1;
   for (const axis of ['X', 'Z'] as const) {
-    const dir = screen[axis];
-    const l = axis === 'X' ? lx : lz;
-    if (l < longest * DEGENERATE_AXIS_RATIO) continue;
+    const dir = dirs[axis];
+    const l = length(dir);
+    if (!(l > 0)) continue;
     const cos = Math.abs((stick.x * dir.x + stick.y * dir.y) / (s * l));
     if (cos > bestCos) {
       bestCos = cos;
@@ -106,7 +141,7 @@ export interface NudgeStep {
  */
 export interface StickController {
   readonly axis: HorizontalAxis | null;
-  /** Один кадр: джойстик, напрямки осей на екрані, час кадру (с) → крок або null. */
+  /** Один кадр: джойстик, напрямки осей на екрані біля точки, час кадру (с) → крок або null. */
   update(stick: Vec2, screen: Record<HorizontalAxis, Vec2>, dtS: number): NudgeStep | null;
   release(): void;
 }
@@ -118,9 +153,10 @@ export function createStickController(): StickController {
       return axis;
     },
     update(stick, screen, dtS) {
-      if (!axis) axis = pickAxis(stick, screen);
+      const dirs = joystickDirections(screen);
+      if (!axis) axis = pickAxis(stick, dirs);
       if (!axis) return null;
-      const velocity = axisVelocity(stick, screen[axis]);
+      const velocity = axisVelocity(stick, dirs[axis]);
       const dt = Math.min(Math.max(dtS, 0), NUDGE_MAX_DT_S);
       if (velocity === 0 || dt === 0) return null;
       return { axis, deltaMm: velocity * dt };

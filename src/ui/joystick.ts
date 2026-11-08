@@ -1,16 +1,28 @@
 /**
  * Джойстик (коло з «кулькою») і повзунок (вертикальна доріжка) для точного доведення точки.
- * Працюють пальцем і мишкою (Pointer Events). Відпустив — «кулька» повертається в центр, значення 0.
+ * Працюють пальцем і мишкою (Pointer Events).
+ *
+ * «Плаваючий» нуль: відлік — від місця, де торкнулися, а не від центру кола. Тож неточний дотик
+ * не зрушує точку: поки палець не відійшов на ≈ 10 px (мертва зона), нічого не відбувається.
+ * Хід — 64 px від місця дотику в будь-який бік (палець може вийти за коло — його не губимо).
+ * Відпустив — «кулька» повертається в центр, значення 0.
  * Значення: x — вправо, y — вниз (як на екрані), довжина ≤ 1. Для повзунка x = 0.
  */
-import type { Vec2 } from '../core/nudge';
+import type { HorizontalAxis, Vec2 } from '../core/nudge';
+
+/** Хід джойстика від місця дотику до повного відхилення, px. */
+export const STICK_TRAVEL_PX = 64;
 
 export interface Stick {
   element: HTMLElement;
-  /** Поточне відхилення (0, 0 — у центрі). */
+  /** Поточне відхилення (0, 0 — на місці дотику). */
   readonly value: Vec2;
   /** Чи тримають зараз джойстик. */
   readonly active: boolean;
+  /** Стрілки осей на колі джойстика (лише для 2D) і вісь, по якій зараз рух. */
+  setAxes(dirs: Record<HorizontalAxis, Vec2> | null, active: HorizontalAxis | null): void;
+  /** Вісь, яку показує «кулька» під час руху (колір і літера). */
+  setKnobAxis(axis: 'X' | 'Y' | 'Z' | null): void;
   dispose(): void;
 }
 
@@ -22,12 +34,33 @@ export interface StickOptions {
   onActiveChange?(active: boolean): void;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 export function createStick(options: StickOptions): Stick {
   const element = document.createElement('div');
   element.className = options.mode === '2d' ? 'stick stick--2d' : 'stick stick--vertical';
   element.dataset.testid = options.testid;
   element.setAttribute('role', 'group');
   element.setAttribute('aria-label', options.label);
+
+  // Стрілки X і Z на колі — у тих напрямках, у яких джойстик їх рухає.
+  const guides = options.mode === '2d' ? document.createElementNS(SVG_NS, 'svg') : null;
+  const guideParts = new Map<HorizontalAxis, { line: SVGLineElement; text: SVGTextElement }>();
+  if (guides) {
+    guides.setAttribute('class', 'stick-guides');
+    guides.setAttribute('viewBox', '-70 -70 140 140');
+    for (const axis of ['X', 'Z'] as const) {
+      const line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('class', `stick-guide stick-guide--${axis.toLowerCase()}`);
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('class', `stick-guide-label stick-guide-label--${axis.toLowerCase()}`);
+      text.textContent = axis;
+      guides.append(line, text);
+      guideParts.set(axis, { line, text });
+    }
+    element.append(guides);
+  }
+
   const knob = document.createElement('div');
   knob.className = 'stick-knob';
   knob.setAttribute('aria-hidden', 'true');
@@ -35,32 +68,35 @@ export function createStick(options: StickOptions): Stick {
   if (options.mode === 'vertical') {
     const up = document.createElement('span');
     up.className = 'stick-hint stick-hint--up';
-    up.textContent = '+Y';
+    up.textContent = '▲';
     const down = document.createElement('span');
     down.className = 'stick-hint stick-hint--down';
-    down.textContent = '−Y';
+    down.textContent = '▼';
     element.append(up, down);
   }
 
   let pointerId: number | null = null;
+  let origin = { x: 0, y: 0 };
   let value: Vec2 = { x: 0, y: 0 };
 
-  const setKnob = (v: Vec2, animate: boolean) => {
+  /** Наскільки «кулька» може відійти від центру, не вилазячи за коло/доріжку, px. */
+  const visualTravel = () => {
     const rect = element.getBoundingClientRect();
-    const travelX = options.mode === '2d' ? (rect.width - knob.offsetWidth) / 2 : 0;
-    const travelY = (rect.height - knob.offsetHeight) / 2;
+    return {
+      x: options.mode === '2d' ? Math.max(0, (rect.width - knob.offsetWidth) / 2) : 0,
+      y: Math.max(0, (rect.height - knob.offsetHeight) / 2),
+    };
+  };
+
+  const setKnob = (v: Vec2, animate: boolean) => {
+    const travel = visualTravel();
     knob.classList.toggle('stick-knob--return', animate);
-    knob.style.transform = `translate(${v.x * travelX}px, ${v.y * travelY}px)`;
+    knob.style.transform = `translate(${v.x * travel.x}px, ${v.y * travel.y}px)`;
   };
 
   const read = (event: PointerEvent): Vec2 => {
-    const rect = element.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const travelX = Math.max(1, (rect.width - knob.offsetWidth) / 2);
-    const travelY = Math.max(1, (rect.height - knob.offsetHeight) / 2);
-    let x = options.mode === '2d' ? (event.clientX - cx) / travelX : 0;
-    let y = (event.clientY - cy) / travelY;
+    let x = options.mode === '2d' ? (event.clientX - origin.x) / STICK_TRAVEL_PX : 0;
+    let y = (event.clientY - origin.y) / STICK_TRAVEL_PX;
     const len = Math.hypot(x, y);
     if (len > 1) {
       x /= len;
@@ -74,6 +110,7 @@ export function createStick(options: StickOptions): Stick {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
     pointerId = event.pointerId;
+    origin = { x: event.clientX, y: event.clientY };
     try {
       // Палець може вийти за межі джойстика — події все одно йдуть сюди.
       element.setPointerCapture(event.pointerId);
@@ -81,7 +118,7 @@ export function createStick(options: StickOptions): Stick {
       // Деякі браузери не дають захопити вказівник — працюємо й без цього.
     }
     element.classList.add('stick--active');
-    value = read(event);
+    value = { x: 0, y: 0 };
     setKnob(value, false);
     options.onActiveChange?.(true);
   };
@@ -114,6 +151,28 @@ export function createStick(options: StickOptions): Stick {
     },
     get active() {
       return pointerId !== null;
+    },
+    setAxes(dirs, activeAxis) {
+      if (!guides) return;
+      guides.style.display = dirs ? '' : 'none';
+      if (!dirs) return;
+      for (const [axis, part] of guideParts) {
+        const d = dirs[axis];
+        const r = 50;
+        part.line.setAttribute('x1', String(-d.x * r));
+        part.line.setAttribute('y1', String(-d.y * r));
+        part.line.setAttribute('x2', String(d.x * r));
+        part.line.setAttribute('y2', String(d.y * r));
+        part.text.setAttribute('x', String(d.x * 60));
+        part.text.setAttribute('y', String(d.y * 60 + 5));
+        part.line.classList.toggle('stick-guide--active', activeAxis === axis);
+        part.line.classList.toggle('stick-guide--dim', activeAxis !== null && activeAxis !== axis);
+        part.text.classList.toggle('stick-guide--dim', activeAxis !== null && activeAxis !== axis);
+      }
+    },
+    setKnobAxis(axis) {
+      knob.dataset.axis = axis ?? '';
+      knob.textContent = axis ?? '';
     },
     dispose() {
       element.remove();

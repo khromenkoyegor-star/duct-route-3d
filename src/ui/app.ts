@@ -59,7 +59,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       phase: 'pickA',
       points: [],
       distanceMm: null,
-      editor: { active: false, label: null, point: null, origin: null, axis: null },
+      editor: { active: false, label: null, point: null, origin: null, axis: null, moved: false },
     },
     error: null,
   };

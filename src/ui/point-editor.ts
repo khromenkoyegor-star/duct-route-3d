@@ -12,6 +12,7 @@
  */
 import {
   createStickController,
+  joystickDirections,
   movePoint,
   type NudgeAxis,
   type PointM,
@@ -31,6 +32,8 @@ export interface PointEditorState {
   origin: PointM | null;
   /** Вісь, по якій точка рухається просто зараз. */
   axis: NudgeAxis | null;
+  /** Чи точку вже підсували після постановки. */
+  moved: boolean;
 }
 
 export interface PointEditor {
@@ -48,10 +51,13 @@ export interface PointEditor {
 export interface PointEditorHandlers {
   onChange(point: PointM): void;
   onConfirm(point: PointM): void;
+  /** Джойстик/повзунок відпустили (можна перевірити, чи точку видно). */
+  onSettle?(point: PointM): void;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const ARROW_PX = 60;
+const ARROW_PX = 64;
+const ARROW_GAP_PX = 16;
 /** Мілісекунди в секунді (час кадрів) — не плутати з мм ↔ м, ті лише в units.ts. */
 const MS_PER_SECOND = 1_000;
 const AXES: NudgeAxis[] = ['X', 'Y', 'Z'];
@@ -116,9 +122,11 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
         const screen = viewer.screenAxes(point);
         step = controller.update(stick.value, { X: screen.X, Z: screen.Z }, dt);
         axis = controller.axis;
+        stick.setKnobAxis(axis);
       } else if (slider.active) {
         step = sliderStep(-slider.value.y, dt);
-        axis = 'Y';
+        axis = step ? 'Y' : axis;
+        slider.setKnobAxis(axis === 'Y' ? 'Y' : null);
       }
       if (step) {
         point = movePoint(point, step.axis, step.deltaMm);
@@ -136,11 +144,15 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     frame = requestAnimationFrame(loop);
   };
   const stopLoop = () => {
+    const wasRunning = frame !== 0;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
     controller.release();
     axis = null;
+    stick.setKnobAxis(null);
+    slider.setKnobAxis(null);
     render();
+    if (wasRunning && point) handlers.onSettle?.(point);
   };
   const onActiveChange = (isActive: boolean) => {
     if (isActive) startLoop();
@@ -185,10 +197,12 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       overlay.hidden = true;
       return;
     }
+    const screen = viewer.screenAxes(point);
+    // Стрілки на самому джойстику — куди він рухає X і Z (з урахуванням «розведення» осей).
+    stick.setAxes(joystickDirections({ X: screen.X, Z: screen.Z }), axis === 'X' || axis === 'Z' ? axis : null);
     const base = viewer.projectPoint(point);
     overlay.hidden = !base.visible;
     if (!base.visible) return;
-    const screen = viewer.screenAxes(point);
     const longest = Math.max(...AXES.map((a) => Math.hypot(screen[a].x, screen[a].y)));
     for (const arrow of arrows) {
       const dir: Vec2 = screen[arrow.name];
@@ -201,8 +215,9 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       const uy = dir.y / len;
       const tipX = base.x + ux * ARROW_PX;
       const tipY = base.y + uy * ARROW_PX;
-      arrow.line.setAttribute('x1', String(base.x - ux * ARROW_PX * 0.6));
-      arrow.line.setAttribute('y1', String(base.y - uy * ARROW_PX * 0.6));
+      // Без «хвоста» за точкою й з відступом від неї — місце виміру не закрите.
+      arrow.line.setAttribute('x1', String(base.x + ux * ARROW_GAP_PX));
+      arrow.line.setAttribute('y1', String(base.y + uy * ARROW_GAP_PX));
       arrow.line.setAttribute('x2', String(tipX));
       arrow.line.setAttribute('y2', String(tipY));
       const side = 6;
@@ -223,6 +238,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   function render(): void {
     if (!point || !origin) return;
     title.textContent = `Точка ${label ?? ''}`.trim();
+    confirm.textContent = `Підтвердити точку ${label ?? ''}`.trim();
     coords.replaceChildren(...coordinates(point));
     const moved: string[] = [];
     const deltas: Record<NudgeAxis, number> = {
@@ -233,9 +249,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     for (const a of AXES) {
       if (Math.abs(deltas[a]) >= 0.05) moved.push(`${a} ${deltas[a] > 0 ? '+' : ''}${formatMm(deltas[a])}`);
     }
-    shift.textContent = moved.length
-      ? `Зсунуто: ${moved.join(' · ')}`
-      : 'Підсуньте джойстиком (X, Z) і повзунком (Y) або одразу підтвердьте';
+    shift.textContent = moved.length ? `Зсув: ${moved.join(' · ')}` : 'Зсув: немає';
     drawArrows();
   }
 
@@ -255,6 +269,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
         point: point ? { ...point } : null,
         origin: origin ? { ...origin } : null,
         axis,
+        moved: !!point && !!origin && (point.x !== origin.x || point.y !== origin.y || point.z !== origin.z),
       };
     },
     edit(next, nextLabel) {

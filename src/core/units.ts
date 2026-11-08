@@ -34,5 +34,6 @@ export function formatMm(mm: number): string {
   assertFinite(mm, 'mm');
   // Прибираємо «−0» після округлення до 0,1 мм.
   const rounded = Math.round(mm * 10) / 10;
-  return `${mmFormat.format(rounded === 0 ? 0 : rounded)} мм`;
+  // Справжній знак мінуса «−» (як на клавіатурі iOS у числах), а не дефіс.
+  return `${mmFormat.format(rounded === 0 ? 0 : rounded).replace('-', '−')} мм`;
 }

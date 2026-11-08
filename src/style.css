@@ -1078,3 +1078,187 @@ body {
     margin: -22px 0 0 -22px;
   }
 }
+
+/* ───────── Редактор точки: правки за UX-рецензією ───────── */
+
+:root {
+  --knob-bg: #ffffff;
+  --stick-label: rgba(60, 60, 67, 0.85);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --knob-bg: #d1d1d6;
+    --stick-label: rgba(235, 235, 245, 0.85);
+  }
+}
+
+/* Панель фіксованої ширини — не «стрибає», коли змінюється текст. */
+.point-editor {
+  width: 400px;
+}
+
+.point-coords {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.point-shift {
+  min-height: 1.3em;
+  font-size: 15px;
+}
+
+.stick--2d {
+  width: 140px;
+  height: 140px;
+}
+
+.stick--vertical {
+  width: 56px;
+  height: 140px;
+  border-radius: 28px;
+}
+
+.stick-knob {
+  display: grid;
+  place-items: center;
+  background: var(--knob-bg);
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* «Кулька» під час руху — кольору осі й з її літерою. */
+.stick--active .stick-knob {
+  background: var(--tint);
+}
+
+.stick-knob[data-axis='X'] {
+  background: var(--axis-x);
+}
+
+.stick-knob[data-axis='Y'] {
+  background: var(--axis-y);
+}
+
+.stick-knob[data-axis='Z'] {
+  background: var(--axis-z);
+}
+
+/* Стрілки X і Z на колі джойстика — куди саме він рухає кожну вісь. */
+.stick-guides {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.stick-guide {
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 4 5;
+}
+
+.stick-guide--x {
+  stroke: var(--axis-x);
+}
+
+.stick-guide--z {
+  stroke: var(--axis-z);
+}
+
+.stick-guide--active {
+  stroke-width: 5;
+  stroke-dasharray: none;
+}
+
+.stick-guide--dim {
+  opacity: 0.25;
+}
+
+.stick-guide-label {
+  font: 700 15px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.stick-guide-label--x {
+  fill: var(--axis-x);
+}
+
+.stick-guide-label--z {
+  fill: var(--axis-z);
+}
+
+.stick-hint {
+  color: var(--stick-label);
+  font-size: 15px;
+}
+
+.stick-hint--up {
+  top: 6px;
+}
+
+.stick-hint--down {
+  bottom: 6px;
+}
+
+/* Стрілки біля точки: біла обвідка — відрізняються від осей сцени. */
+.axis-arrow line {
+  stroke-width: 4;
+  filter: drop-shadow(0 0 1.5px #ffffff) drop-shadow(0 0 1px #ffffff);
+}
+
+.axis-arrow--active line {
+  stroke-width: 7;
+}
+
+/* iPhone вертикально: на час доведення точки нижні кнопки ховаються — редактор нижче, ближче до пальця. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .point-editor {
+    width: auto;
+  }
+
+  .is-editing-point .toolbar {
+    display: none;
+  }
+
+  .is-editing-point .point-editor {
+    bottom: calc(var(--safe-bottom) + var(--gap));
+  }
+}
+
+/* iPhone горизонтально: на час доведення точки ховається панель «Траса 3D»; редактор компактний. */
+@media (max-height: 500px) {
+  .is-editing-point .title-panel {
+    display: none;
+  }
+
+  .point-editor {
+    width: 350px;
+  }
+
+  .point-coords {
+    font-size: 15px;
+  }
+
+  .point-shift {
+    font-size: 13px;
+  }
+
+  .stick--2d {
+    width: 120px;
+    height: 120px;
+  }
+
+  .stick--vertical {
+    width: 50px;
+    height: 120px;
+  }
+
+  .confirm-button {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+}

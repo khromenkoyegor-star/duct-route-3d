@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   axisVelocity,
   createStickController,
+  joystickDirections,
   movePoint,
   NUDGE_DEAD_ZONE,
   NUDGE_MAX_DT_S,
@@ -32,15 +33,17 @@ describe('швидкість від сили відхилення', () => {
     expect(nudgeSpeed(-1)).toBeCloseTo(500, 9);
   });
 
-  it('плавно зростає (чим сильніше — тим швидше)', () => {
+  it('плавно зростає (чим сильніше — тим швидше), з широкою зоною повільного руху', () => {
     let previous = 0;
-    for (let d = 0.11; d <= 1; d += 0.01) {
+    for (let d = NUDGE_DEAD_ZONE + 0.01; d <= 1; d += 0.01) {
       const speed = nudgeSpeed(d);
       expect(speed).toBeGreaterThan(previous);
       previous = speed;
     }
-    // Посередині — десятки мм/с: зручно доводити.
-    expect(nudgeSpeed(0.55)).toBeCloseTo(50, 6);
+    // Хід 64 px: 20 px від дотику — ще повільно (< 10 мм/с), 40 px — десятки мм/с.
+    expect(nudgeSpeed(20 / 64)).toBeLessThan(10);
+    expect(nudgeSpeed(40 / 64)).toBeGreaterThan(20);
+    expect(nudgeSpeed(40 / 64)).toBeLessThan(80);
   });
 
   it('NaN — 0, а не «NaN мм»', () => {
@@ -64,11 +67,46 @@ describe('вибір осі за напрямком на екрані', () => {
   });
 
   it('у мертвій зоні — нічого', () => {
-    expect(pickAxis({ x: 0.05, y: 0.05 }, TOP)).toBeNull();
+    expect(pickAxis({ x: 0.08, y: 0.08 }, TOP)).toBeNull();
   });
 
-  it('вісь, що «дивиться в камеру», не вибирається', () => {
-    expect(pickAxis({ x: 0, y: -0.9 }, FRONT)).toBe('X');
+  it('вісь, що «дивиться в камеру», на джойстику — перпендикулярно (теж досяжна)', () => {
+    const dirs = joystickDirections(FRONT);
+    expect(dirs.X).toEqual({ x: 1, y: 0 });
+    expect(Math.abs(dirs.Z.x)).toBeLessThan(1e-9);
+    expect(dirs.Z.y).toBeLessThan(0); // у бік справжньої (крихітної) стрілки Z — вгору
+    expect(pickAxis({ x: 0, y: -0.9 }, dirs)).toBe('Z');
+    expect(pickAxis({ x: 0.9, y: 0.1 }, dirs)).toBe('X');
+  });
+});
+
+describe('напрямки осей на джойстику', () => {
+  it('добре розведені осі — як на екрані', () => {
+    const dirs = joystickDirections(TOP);
+    expect(dirs.X).toEqual({ x: 1, y: 0 });
+    expect(dirs.Z).toEqual({ x: 0, y: 1 });
+  });
+
+  it('X і Z майже на одній лінії (вид з кута на рівні очей) — Z розводиться перпендикулярно', () => {
+    const deg = (a: number) => ({ x: 100 * Math.cos((a * Math.PI) / 180), y: 100 * Math.sin((a * Math.PI) / 180) });
+    const corner = { X: deg(9), Z: { x: deg(170).x * 0.9, y: deg(170).y * 0.9 } };
+    const dirs = joystickDirections(corner);
+    // X — як на екрані.
+    expect(dirs.X.x).toBeCloseTo(Math.cos((9 * Math.PI) / 180), 9);
+    // Z — під прямим кутом до X.
+    expect(Math.abs(dirs.X.x * dirs.Z.x + dirs.X.y * dirs.Z.y)).toBeLessThan(1e-9);
+    // У бік справжньої стрілки Z (скалярний добуток ≥ 0).
+    expect(dirs.Z.x * corner.Z.x + dirs.Z.y * corner.Z.y).toBeGreaterThanOrEqual(0);
+    // Тягнемо вздовж нового напрямку Z — вибирається Z і їде на повній швидкості.
+    expect(pickAxis(dirs.Z, dirs)).toBe('Z');
+    expect(axisVelocity(dirs.Z, dirs.Z)).toBeCloseTo(500, 6);
+  });
+
+  it('усі осі за камерою — запасні напрямки, без NaN', () => {
+    const dirs = joystickDirections({ X: { x: 0, y: 0 }, Z: { x: 0, y: 0 } });
+    for (const v of [dirs.X, dirs.Z]) {
+      expect(Number.isFinite(v.x) && Number.isFinite(v.y)).toBe(true);
+    }
   });
 });
 
@@ -106,7 +144,7 @@ describe('рух лише по одній осі', () => {
 describe('джойстик між кадрами', () => {
   it('вісь фіксується при першому русі й не змінюється, навіть якщо потім тягнути вбік', () => {
     const c = createStickController();
-    expect(c.update({ x: 0.05, y: 0 }, TOP, 0.016)).toBeNull(); // мертва зона
+    expect(c.update({ x: 0.1, y: 0 }, TOP, 0.016)).toBeNull(); // мертва зона
     expect(c.axis).toBeNull();
     const first = c.update({ x: 0.8, y: 0.1 }, TOP, 0.016)!;
     expect(first.axis).toBe('X');
@@ -128,7 +166,7 @@ describe('джойстик між кадрами', () => {
 
     const slow = createStickController();
     let small = 0;
-    for (let i = 0; i < 60; i++) small += slow.update({ x: 0.12, y: 0 }, TOP, 1 / 60)?.deltaMm ?? 0;
+    for (let i = 0; i < 60; i++) small += slow.update({ x: NUDGE_DEAD_ZONE + 0.02, y: 0 }, TOP, 1 / 60)?.deltaMm ?? 0;
     expect(small).toBeGreaterThan(4);
     expect(small).toBeLessThan(7);
   });
@@ -144,7 +182,7 @@ describe('повзунок Y', () => {
   it('вгору — +Y, вниз — −Y, у мертвій зоні — нічого', () => {
     expect(sliderVelocity(1)).toBeCloseTo(500, 6);
     expect(sliderVelocity(-1)).toBeCloseTo(-500, 6);
-    expect(sliderStep(0.05, 0.016)).toBeNull();
+    expect(sliderStep(0.1, 0.016)).toBeNull();
     const step = sliderStep(-0.5, 0.1)!;
     expect(step.axis).toBe('Y');
     expect(step.deltaMm).toBeLessThan(0);

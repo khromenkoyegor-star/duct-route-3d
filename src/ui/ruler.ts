@@ -53,6 +53,10 @@ const HINTS: Record<RulerPhase, string> = {
   done: 'Торкніться скану, щоб почати новий вимір',
 };
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
+const HINT_CONFIRM_MOVE = 'Точку вже підсунуто. Торкніться тут ще раз, щоб перенести її сюди';
+/** Повторний дотик для перенесення підсунутої точки: не пізніше й не далі за це. */
+const MOVE_CONFIRM_MS = 4000;
+const MOVE_CONFIRM_PX = 40;
 const LABELS = ['А', 'Б'] as const;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -74,7 +78,8 @@ export function createRuler(
   done.type = 'button';
   done.className = 'ruler-done';
   done.dataset.testid = 'ruler-done';
-  done.textContent = 'Готово';
+  // «Закрити», а не «Готово»: в iOS «Готово» означає «підтвердити», а тут — вихід з рулетки.
+  done.textContent = 'Закрити';
   done.addEventListener('click', () => handlers.onDone?.());
   head.append(title, done);
   const text = document.createElement('p');
@@ -118,6 +123,8 @@ export function createRuler(
   let phase: RulerPhase = 'pickA';
   let points: Vector3[] = [];
   let missed = false;
+  /** Перший дотик для перенесення вже підсунутої точки (чекаємо другий у тому самому місці). */
+  let pendingMove: { x: number; y: number; time: number } | null = null;
   let downView: ViewSnapshot | null = null;
 
   const editingIndex = () => (phase === 'editA' ? 0 : phase === 'editB' ? 1 : -1);
@@ -134,9 +141,13 @@ export function createRuler(
       if (i < 0) return;
       points[i] = new Vector3(point.x, point.y, point.z);
       phase = i === 0 ? 'pickB' : 'done';
+      pendingMove = null;
       editor.close();
       handlers.onEditingChange?.(false);
       render();
+    },
+    onSettle(point) {
+      keepVisible(new Vector3(point.x, point.y, point.z));
     },
   });
 
@@ -181,7 +192,8 @@ export function createRuler(
         el.setAttribute('y2', String(sb.y));
       }
     }
-    if (a && b) place(label, a.clone().add(b).multiplyScalar(0.5), 'translate(-50%, -150%)');
+    // Поки Б доводять, підпис на сцені закривав би точку — число видно в панелі рулетки.
+    if (a && b && phase !== 'editB') place(label, a.clone().add(b).multiplyScalar(0.5), 'translate(-50%, -150%)');
     else label.hidden = true;
   };
   const stopFrames = viewer.onFrame(updateOverlay);
@@ -199,28 +211,52 @@ export function createRuler(
       text.textContent = HINTS[phase];
     }
     // Другий рядок: промах — попередження; інакше підказка, якщо головний рядок зайнятий числом.
-    sub.textContent = missed ? HINT_MISS : hasDistance ? HINTS[phase] : '';
+    const warning = missed ? HINT_MISS : pendingMove ? HINT_CONFIRM_MOVE : '';
+    sub.textContent = warning || (hasDistance ? HINTS[phase] : '');
     sub.hidden = sub.textContent === '';
-    sub.classList.toggle('ruler-sub--warning', missed);
+    sub.classList.toggle('ruler-sub--warning', warning !== '');
     viewer.requestRender();
     updateOverlay();
     handlers.onChange?.(current);
   }
 
-  /** Якщо точку закрила панель джойстика (iPhone) або вона за краєм — зсунути камеру до неї. */
+  /**
+   * Точку має бути видно: якщо її закрила панель (джойстик, рулетка, кнопки) або вона за краєм екрана,
+   * камера зсувається так, щоб точка опинилась посередині вільної від панелей частини екрана.
+   */
   const keepVisible = (world: Vector3) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const obstacles = [...document.querySelectorAll<HTMLElement>('.panel, .toolbar, .point-editor')]
+      .filter((el) => !el.hidden && getComputedStyle(el).display !== 'none')
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0);
+    const margin = 28;
     const screen = viewer.projectPoint(world);
-    const rect = editor.element.getBoundingClientRect();
-    const margin = 24;
-    const covered =
-      rect.width > 0 &&
-      screen.x > rect.left - margin &&
-      screen.x < rect.right + margin &&
-      screen.y > rect.top - margin &&
-      screen.y < rect.bottom + margin;
-    const outside =
-      !screen.visible || screen.x < 0 || screen.y < 0 || screen.x > window.innerWidth || screen.y > window.innerHeight;
-    if (covered || outside) viewer.centerOn(world);
+    const covered = obstacles.some(
+      (r) => screen.x > r.left - margin && screen.x < r.right + margin && screen.y > r.top - margin && screen.y < r.bottom + margin,
+    );
+    const outside = !screen.visible || screen.x < margin || screen.y < margin || screen.x > vw - margin || screen.y > vh - margin;
+    if (!covered && !outside) return;
+
+    // Вільні прямокутники: смуга між верхніми й нижніми панелями або місце праворуч від редактора.
+    const free = (left: number, right: number) => {
+      const overlapping = obstacles.filter((r) => r.right > left && r.left < right);
+      const top = Math.max(0, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
+      const bottom = Math.min(vh, ...overlapping.filter((r) => r.top >= vh / 2).map((r) => r.top));
+      return { left, right, top, bottom };
+    };
+    const editorRect = editor.element.getBoundingClientRect();
+    const candidates = [free(0, vw)];
+    if (editorRect.width > 0 && editorRect.right < vw * 0.75) candidates.push(free(editorRect.right, vw));
+    const score = (c: { left: number; right: number; top: number; bottom: number }) =>
+      Math.min(c.right - c.left, c.bottom - c.top);
+    const best = candidates.reduce((a, b) => (score(b) > score(a) ? b : a));
+    if (score(best) < 60) {
+      viewer.centerOn(world);
+      return;
+    }
+    viewer.centerOn(world, { x: (best.left + best.right) / 2, y: (best.top + best.bottom) / 2 });
   };
 
   const startEditing = (index: 0 | 1, hit: Vector3) => {
@@ -242,6 +278,19 @@ export function createRuler(
       const hit = viewer.raycastScan(x, y);
       missed = !hit;
       if (hit) {
+        // Підсунуту точку випадковий дотик не переносить: потрібен другий дотик у тому самому місці.
+        const editing = phase === 'editA' || phase === 'editB';
+        if (editing && editor.state.moved) {
+          const now = performance.now();
+          const confirmed =
+            pendingMove && now - pendingMove.time < MOVE_CONFIRM_MS && Math.hypot(x - pendingMove.x, y - pendingMove.y) < MOVE_CONFIRM_PX;
+          if (!confirmed) {
+            pendingMove = { x, y, time: now };
+            render();
+            return;
+          }
+        }
+        pendingMove = null;
         // А (або новий вимір) — у фазах pickA/editA/done; Б — у pickB/editB.
         startEditing(phase === 'pickB' || phase === 'editB' ? 1 : 0, hit);
       }
@@ -253,6 +302,7 @@ export function createRuler(
     points = [];
     phase = 'pickA';
     missed = false;
+    pendingMove = null;
     if (editor.state.active) {
       editor.close();
       handlers.onEditingChange?.(false);

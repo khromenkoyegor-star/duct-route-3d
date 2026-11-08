@@ -63,13 +63,13 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Підпис зсуву по висоті: «Низ скану на Y = 0 · піднято на 1 400 мм».
+ * Підпис зсуву по висоті: «Низ скану на Y = 0 · скан піднято на 1 400 мм».
  * Зсув менший за 0,5 мм не згадуємо.
  */
 export function formatOffsetY(offsetYMm: number): string {
   if (Math.abs(offsetYMm) < 0.5) return 'Низ скану на Y = 0';
   const direction = offsetYMm > 0 ? 'піднято' : 'опущено';
-  return `Низ скану на Y = 0 · ${direction} на ${formatMm(Math.abs(offsetYMm))}`;
+  return `Низ скану на Y = 0 · скан ${direction} на ${formatMm(Math.abs(offsetYMm))}`;
 }
 
 /** «4 000 × 2 700 × 3 000 мм» (X × Y × Z). */
