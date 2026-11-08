@@ -290,6 +290,30 @@ test.describe('Траса: побудова полілінії', () => {
     expect((await routes(page)).set.nextId).toBe(1);
   });
 
+  test('кнопки видів під час побудови: вид уздовж осі, точку, яку тягнуть, не закривають панелі', async ({ page }) => {
+    await openRoom(page);
+    await startRoute(page);
+    await confirm(page);
+    await pull(page, 'X', 1, 400);
+    const point = await editorPoint(page);
+    for (const axis of ['x', 'z', 'y'] as const) {
+      await page.getByTestId(`view-${axis}`).click();
+      const view = await page.evaluate(() => window.__trasa!.viewer.snapshotView());
+      const d = { x: view.position.x - view.target.x, y: view.position.y - view.target.y, z: view.position.z - view.target.z };
+      expect(Math.abs(d[axis]) / Math.hypot(d.x, d.y, d.z), `вид уздовж ${axis}`).toBeGreaterThan(0.9999);
+      const sp = await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), point);
+      const vp = page.viewportSize()!;
+      expect(sp.visible).toBe(true);
+      expect(sp.x > 0 && sp.y > 0 && sp.x < vp.width && sp.y < vp.height).toBe(true);
+      for (const id of ['point-editor', 'route-panel']) {
+        const r = (await page.getByTestId(id).filter({ visible: true }).boundingBox())!;
+        const inside = sp.x > r.x - 12 && sp.x < r.x + r.width + 12 && sp.y > r.y - 12 && sp.y < r.y + r.height + 12;
+        expect(inside, `${axis}: точку закриває ${id}`).toBe(false);
+      }
+    }
+    expect(await editorPoint(page)).toEqual(point);
+  });
+
   test('обертання камери точок не зсуває', async ({ page }) => {
     await openRoom(page);
     await startRoute(page);

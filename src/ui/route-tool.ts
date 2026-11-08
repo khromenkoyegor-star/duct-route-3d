@@ -143,6 +143,8 @@ export function createRouteTool(
   const editor = createPointEditor(viewer, {
     onChange(point) {
       pending = point;
+      // Точку вже тягнуть — підказка про дотик більше не потрібна.
+      pullTapped = false;
       render();
     },
     onConfirm(point) {
@@ -150,6 +152,7 @@ export function createRouteTool(
       nodes = [...nodes, { ...point }];
       retap.clear();
       missed = false;
+      pullTapped = false;
       startPull();
       render();
     },
