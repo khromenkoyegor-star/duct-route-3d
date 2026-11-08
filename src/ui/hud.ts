@@ -1,8 +1,15 @@
+import { formatBytes, formatCount, formatSizeMm, type ScanInfo } from '../core/scan-info';
 import { formatMm } from '../core/units';
 import { createVersionBadge } from './version-badge';
 
-/** Назва додатка — панель зверху зліва. */
-export function createTitle(): HTMLElement {
+export interface TitlePanel {
+  element: HTMLElement;
+  /** Показати інформацію про відкритий скан (null — скану немає). */
+  showScan(name: string | null, info: ScanInfo | null): void;
+}
+
+/** Назва додатка й інформація про скан — панель зверху зліва. */
+export function createTitle(): TitlePanel {
   const panel = document.createElement('header');
   panel.className = 'panel title-panel';
   panel.dataset.testid = 'title';
@@ -13,10 +20,50 @@ export function createTitle(): HTMLElement {
 
   const subtitle = document.createElement('p');
   subtitle.className = 'subtitle';
-  subtitle.textContent = 'Порожня сцена · скан відкриватиметься на етапі 1';
+  subtitle.textContent = 'Відкрийте скан з Polycam (ZIP з GLTF)';
 
-  panel.append(name, subtitle, createVersionBadge());
-  return panel;
+  const scan = document.createElement('div');
+  scan.className = 'scan-info';
+  scan.dataset.testid = 'scan-info';
+  scan.hidden = true;
+
+  const scanName = document.createElement('p');
+  scanName.className = 'scan-name';
+  scanName.dataset.testid = 'scan-name';
+  const scanSize = document.createElement('p');
+  scanSize.className = 'scan-row';
+  scanSize.dataset.testid = 'scan-size';
+  const scanStats = document.createElement('p');
+  scanStats.className = 'scan-row scan-row--secondary';
+  scanStats.dataset.testid = 'scan-stats';
+  const warnings = document.createElement('ul');
+  warnings.className = 'scan-warnings';
+  warnings.dataset.testid = 'scan-warnings';
+  scan.append(scanName, scanSize, scanStats, warnings);
+
+  panel.append(name, subtitle, scan, createVersionBadge());
+
+  return {
+    element: panel,
+    showScan(fileName, info) {
+      const hasScan = !!fileName && !!info;
+      scan.hidden = !hasScan;
+      subtitle.hidden = hasScan;
+      panel.classList.toggle('title-panel--scan', hasScan);
+      if (!hasScan) return;
+      scanName.textContent = fileName;
+      scanSize.textContent = `Габарит: ${formatSizeMm(info.sizeMm)}`;
+      scanStats.textContent = `${formatCount(info.triangles)} трикутників · ${formatBytes(info.fileBytes)}`;
+      warnings.replaceChildren(
+        ...info.warnings.map((text) => {
+          const item = document.createElement('li');
+          item.textContent = text;
+          return item;
+        }),
+      );
+      warnings.hidden = info.warnings.length === 0;
+    },
+  };
 }
 
 /** Підказка про масштаб і осі — панель знизу зліва. */

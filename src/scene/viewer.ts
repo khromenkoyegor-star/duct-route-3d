@@ -1,9 +1,15 @@
 import {
+  Box3,
   Color,
   GridHelper,
+  Group,
   type Material,
+  type Object3D,
   PerspectiveCamera,
+  Raycaster,
   Scene,
+  Sphere,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -30,6 +36,12 @@ export interface ScreenPoint {
   y: number;
 }
 
+export interface Vec3Like {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface Viewer {
   readonly canvas: HTMLCanvasElement;
   /** Перемалювати кадр (сцена малюється лише тоді, коли щось змінилось). */
@@ -38,6 +50,23 @@ export interface Viewer {
   resetView(): void;
   /** Екранні координати (CSS px) початку координат і підписів осей — для тестів. */
   projectAxes(): Record<'origin' | AxisName, ScreenPoint>;
+  /** Точка сцени (м) → екран (CSS px); visible = перед камерою. */
+  projectPoint(point: Vec3Like): ScreenPoint & { visible: boolean };
+  /** Показати скан (null — прибрати). Звільнення пам'яті — справа того, хто завантажив. */
+  setScan(root: Object3D | null): void;
+  /** Межі скану в метрах або null, якщо скану немає. */
+  scanBox(): Box3 | null;
+  /** «Показати все»: камера охоплює весь скан (або стартовий вигляд, якщо скану немає). */
+  showAll(direction?: 'default' | 'current'): void;
+  /** Перша точка поверхні скану під екранною точкою (CSS px) або null. */
+  raycastScan(clientX: number, clientY: number): Vector3 | null;
+  /** Поставити камеру: звідки й куди дивитися (м). */
+  setView(position: Vec3Like, target: Vec3Like): void;
+  /** Додати/прибрати допоміжний об'єкт (лінія рулетки тощо). */
+  add(object: Object3D): void;
+  remove(object: Object3D): void;
+  /** Викликається після кожного намальованого кадру. Повертає функцію відписки. */
+  onFrame(callback: () => void): () => void;
   /** Скільки кадрів намальовано — для тестів. */
   readonly frameCount: number;
   dispose(): void;
@@ -80,16 +109,25 @@ export function createViewer(container: HTMLElement): Viewer {
   const axes = createAxes(theme);
   scene.add(axes.group);
 
-  // Базове обертання камери (повне налаштування керування — етап 1).
+  // Скан — окремою групою: його не масштабуємо й не рухаємо.
+  const scanGroup = new Group();
+  scanGroup.name = 'scan-group';
+  scene.add(scanGroup);
+
+  // Камера: мишка — ліва кнопка обертає, права зсуває, колесо наближає до курсора;
+  // дотик — один палець обертає, два зсувають і наближають щипком (налаштування OrbitControls).
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
-  controls.minDistance = 0.2;
+  controls.zoomToCursor = true;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 0.05;
   controls.maxDistance = 200;
   controls.target.copy(VIEW_TARGET);
 
   let needsRender = true;
   let frameCount = 0;
+  const frameCallbacks = new Set<() => void>();
   const requestRender = () => {
     needsRender = true;
   };
@@ -137,6 +175,41 @@ export function createViewer(container: HTMLElement): Viewer {
     requestRender();
   }
 
+  function scanBox(): Box3 | null {
+    if (scanGroup.children.length === 0) return null;
+    scanGroup.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scanGroup);
+    return box.isEmpty() ? null : box;
+  }
+
+  function showAll(direction: 'default' | 'current' = 'current'): void {
+    const box = scanBox();
+    if (!box) {
+      resetView();
+      return;
+    }
+    const sphere = box.getBoundingSphere(new Sphere());
+    const radius = Math.max(sphere.radius, 0.05);
+    const dir =
+      direction === 'default'
+        ? VIEW_DIRECTION.clone()
+        : camera.position.clone().sub(controls.target).normalize();
+    if (!Number.isFinite(dir.x) || dir.lengthSq() === 0) dir.copy(VIEW_DIRECTION);
+    const distance = (radius / Math.sin(fitAngle() / 2)) * 1.02;
+    controls.target.copy(sphere.center);
+    camera.position.copy(sphere.center).addScaledVector(dir, distance);
+    // Дальність видимості й межа віддалення — під розмір скану.
+    camera.far = Math.max(1000, (distance + radius) * 4);
+    camera.updateProjectionMatrix();
+    controls.maxDistance = Math.max(200, distance * 5);
+    camera.lookAt(sphere.center);
+    controls.update();
+    requestRender();
+  }
+
+  const raycaster = new Raycaster();
+  const pointer = new Vector2();
+
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(container);
   resize();
@@ -159,8 +232,21 @@ export function createViewer(container: HTMLElement): Viewer {
       needsRender = false;
       renderer.render(scene, camera);
       frameCount += 1;
+      for (const callback of frameCallbacks) callback();
     }
   });
+
+  function projectPoint(point: Vec3Like): ScreenPoint & { visible: boolean } {
+    const rect = canvas.getBoundingClientRect();
+    const world = new Vector3(point.x, point.y, point.z);
+    const visible = world.clone().applyMatrix4(camera.matrixWorldInverse).z < 0;
+    const ndc = world.project(camera);
+    return {
+      x: rect.left + ((ndc.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - ndc.y) / 2) * rect.height,
+      visible,
+    };
+  }
 
   return {
     canvas,
@@ -170,13 +256,9 @@ export function createViewer(container: HTMLElement): Viewer {
       return frameCount;
     },
     projectAxes() {
-      const rect = canvas.getBoundingClientRect();
       const toScreen = (world: Vector3): ScreenPoint => {
-        const ndc = world.clone().project(camera);
-        return {
-          x: rect.left + ((ndc.x + 1) / 2) * rect.width,
-          y: rect.top + ((1 - ndc.y) / 2) * rect.height,
-        };
+        const { x, y } = projectPoint(world);
+        return { x, y };
       };
       return {
         origin: toScreen(new Vector3(0, 0, 0)),
@@ -185,8 +267,46 @@ export function createViewer(container: HTMLElement): Viewer {
         Z: toScreen(axes.labelPosition('Z')),
       };
     },
+    projectPoint,
+    setScan(root) {
+      scanGroup.clear();
+      if (root) scanGroup.add(root);
+      requestRender();
+    },
+    scanBox,
+    showAll,
+    raycastScan(clientX, clientY) {
+      if (scanGroup.children.length === 0) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      camera.updateMatrixWorld();
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObject(scanGroup, true)[0];
+      return hit ? hit.point.clone() : null;
+    },
+    setView(position, target) {
+      controls.target.set(target.x, target.y, target.z);
+      camera.position.set(position.x, position.y, position.z);
+      camera.lookAt(controls.target);
+      controls.update();
+      requestRender();
+    },
+    add(object) {
+      scene.add(object);
+      requestRender();
+    },
+    remove(object) {
+      scene.remove(object);
+      requestRender();
+    },
+    onFrame(callback) {
+      frameCallbacks.add(callback);
+      return () => frameCallbacks.delete(callback);
+    },
     dispose() {
       renderer.setAnimationLoop(null);
+      frameCallbacks.clear();
       resizeObserver.disconnect();
       stopWatchingTheme();
       controls.removeEventListener('change', requestRender);

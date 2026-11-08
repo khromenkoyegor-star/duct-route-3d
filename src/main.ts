@@ -1,12 +1,13 @@
 import './style.css';
-import { createViewer, GRID_CELL_MM, type Viewer } from './scene/viewer';
-import { createFatalMessage, createLegend, createTitle } from './ui/hud';
+import { createViewer, type Viewer } from './scene/viewer';
+import { type App, createApp } from './ui/app';
+import { createFatalMessage } from './ui/hud';
 import { createVersionBadge } from './ui/version-badge';
 
 declare global {
   interface Window {
     /** Доступ для автотестів (Playwright). */
-    __trasa?: { viewer: Viewer };
+    __trasa?: { viewer: Viewer; app?: App };
   }
 }
 
@@ -16,23 +17,27 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
 }
 
-const app = document.querySelector<HTMLDivElement>('#app');
-if (!app) throw new Error('Немає елемента #app');
+const root = document.querySelector<HTMLDivElement>('#app');
+if (!root) throw new Error('Немає елемента #app');
 
 const stage = document.createElement('div');
 stage.className = 'stage';
-app.append(stage);
+root.append(stage);
 
+let viewer: Viewer | null = null;
 try {
-  const viewer = createViewer(stage);
-  window.__trasa = { viewer };
-  app.append(createTitle(), createLegend(GRID_CELL_MM));
+  viewer = createViewer(stage);
 } catch (error) {
   console.error(error);
-  app.append(
+  root.append(
     createFatalMessage(
       'Не вдалося запустити 3D-сцену. Перезавантажте сторінку; якщо не допоможе — оновіть iOS / iPadOS.',
     ),
   );
-  app.append(createVersionBadge(true));
+  root.append(createVersionBadge(true));
+}
+
+if (viewer) {
+  window.__trasa = { viewer };
+  window.__trasa.app = createApp(root, viewer);
 }

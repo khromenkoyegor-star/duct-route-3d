@@ -11,6 +11,14 @@
   --axis-x: #ff3b30;
   --axis-y: #34c759;
   --axis-z: #007aff;
+  --tint: #007aff;
+  --tint-label: #ffffff;
+  --accent: #ff9f0a;
+  --fill: rgba(120, 120, 128, 0.16);
+  --card-bg: rgba(246, 246, 248, 0.94);
+  --warning-bg: rgba(255, 204, 0, 0.22);
+  --backdrop: rgba(0, 0, 0, 0.2);
+  --toolbar-h: 64px;
   --gap: 12px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -29,7 +37,16 @@
     --axis-x: #ff453a;
     --axis-y: #30d158;
     --axis-z: #0a84ff;
+    --tint: #0a84ff;
+    --fill: rgba(120, 120, 128, 0.32);
+    --card-bg: rgba(44, 44, 46, 0.94);
+    --warning-bg: rgba(255, 214, 10, 0.2);
+    --backdrop: rgba(0, 0, 0, 0.45);
   }
+}
+
+[hidden] {
+  display: none !important;
 }
 
 *,
@@ -214,5 +231,330 @@ body {
 
   .legend-axes {
     margin-top: 0;
+  }
+}
+
+/* ───────── Етап 1: кнопки, інформація про скан, рулетка, діалоги ───────── */
+
+.stage {
+  z-index: 0;
+}
+
+.panel,
+.toolbar {
+  z-index: 2;
+}
+
+.title-panel {
+  max-width: min(380px, calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap)));
+}
+
+.scan-info {
+  margin-top: 4px;
+}
+
+.scan-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-row {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-row--secondary {
+  color: var(--label-secondary);
+}
+
+.scan-warnings {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--warning-bg);
+  font-size: 13px;
+}
+
+.scan-warnings li + li {
+  margin-top: 4px;
+}
+
+/* Панель кнопок: широкий екран — зверху справа. */
+.toolbar {
+  position: absolute;
+  top: calc(var(--safe-top) + var(--gap));
+  right: calc(var(--safe-right) + var(--gap));
+  display: flex;
+  gap: 8px;
+}
+
+.tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0.5px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  box-shadow: var(--panel-shadow);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  color: var(--tint);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tool-button svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.tool-button--primary,
+.tool-button--active {
+  background: var(--tint);
+  color: var(--tint-label);
+  border-color: transparent;
+}
+
+.tool-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tool-button:not(:disabled):active {
+  opacity: 0.6;
+}
+
+.tool-button:focus-visible,
+.card-button:focus-visible {
+  outline: 3px solid var(--tint);
+  outline-offset: 2px;
+}
+
+/* Рулетка: панель з підказкою/результатом під кнопками. */
+.ruler-panel {
+  top: calc(var(--safe-top) + var(--gap) + 44px + 8px);
+  right: calc(var(--safe-right) + var(--gap));
+  min-width: 220px;
+  text-align: right;
+}
+
+.ruler-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ruler-text {
+  margin: 2px 0 0;
+  font-size: 15px;
+}
+
+.ruler-text--result {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ruler-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ruler-marker,
+.ruler-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.ruler-marker {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.ruler-label {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #000000;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Діалоги: індикатор і помилка по центру. */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-top) + 24px) calc(var(--safe-right) + 24px) calc(var(--safe-bottom) + 24px)
+    calc(var(--safe-left) + 24px);
+  background: var(--backdrop);
+  touch-action: none;
+}
+
+.card {
+  width: min(320px, 100%);
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--card-bg);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  -webkit-backdrop-filter: saturate(180%) blur(30px);
+  backdrop-filter: saturate(180%) blur(30px);
+  text-align: center;
+}
+
+.card--alert {
+  padding-bottom: 8px;
+}
+
+.card-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.card-text {
+  margin: 0;
+  font-size: 15px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.card-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border: 0;
+  border-top: 0.5px solid var(--panel-border);
+  background: transparent;
+  color: var(--tint);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 12px;
+  border: 3px solid var(--fill);
+  border-top-color: var(--tint);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Вузький екран (iPhone вертикально): кнопки — панеллю знизу, як в iOS. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .toolbar {
+    top: auto;
+    left: calc(var(--safe-left) + var(--gap));
+    right: calc(var(--safe-right) + var(--gap));
+    bottom: calc(var(--safe-bottom) + var(--gap));
+    height: var(--toolbar-h);
+    padding: 6px;
+    gap: 6px;
+    border-radius: 16px;
+    background: var(--panel-bg);
+    border: 0.5px solid var(--panel-border);
+    box-shadow: var(--panel-shadow);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+  }
+
+  .tool-button {
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 4px;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .tool-button--primary,
+  .tool-button--active {
+    background: var(--tint);
+  }
+
+  .legend-panel,
+  .ruler-panel {
+    bottom: calc(var(--safe-bottom) + var(--gap) + var(--toolbar-h) + 8px);
+  }
+
+  .ruler-panel {
+    top: auto;
+    left: calc(var(--safe-left) + var(--gap));
+    right: calc(var(--safe-right) + var(--gap));
+    text-align: center;
+  }
+
+  /* Поки працює рулетка, легенда поступається місцем її панелі. */
+  .is-ruler .legend-panel {
+    display: none;
+  }
+}
+
+/* Низький екран (iPhone горизонтально): компактні кнопки зверху справа. */
+@media (max-height: 500px) {
+  .toolbar {
+    gap: 6px;
+  }
+
+  .tool-button {
+    padding: 0 10px;
+    font-size: 14px;
+  }
+
+  .scan-row--secondary,
+  .scan-warnings li + li {
+    display: none;
+  }
+}
+
+/* Дуже вузьке вікно (Slide Over на iPad): лише іконки. */
+@media (max-width: 380px) and (min-height: 501px) {
+  .tool-label {
+    font-size: 11px;
   }
 }
