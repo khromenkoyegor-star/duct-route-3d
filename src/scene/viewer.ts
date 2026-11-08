@@ -6,6 +6,7 @@ import {
   type Material,
   type Object3D,
   PerspectiveCamera,
+  Quaternion,
   Raycaster,
   Scene,
   Sphere,
@@ -233,12 +234,45 @@ export function createViewer(container: HTMLElement): Viewer {
     requestRender();
   });
 
+  /** Зупинити інерцію камери одразу (без анімації залишку руху). */
+  function flushInertia(): void {
+    const damping = controls.enableDamping;
+    controls.enableDamping = false;
+    controls.update();
+    controls.enableDamping = damping;
+  }
+
+  // Поки палець/мишка тримає сцену — це жест, а не інерція.
+  let interacting = false;
+  controls.addEventListener('start', () => {
+    interacting = true;
+  });
+  controls.addEventListener('end', () => {
+    interacting = false;
+  });
+
+  /**
+   * Інерція згасає плавно, але її «хвіст» — десятки кадрів, де камера зсувається менше ніж на піксель.
+   * Коли рух за кадр стає таким (кут < 1e-4 рад ≈ 0,1 px на iPad), зупиняємо інерцію одразу:
+   * на око різниці немає, а відеокарта й батарея відпочивають.
+   */
+  const INERTIA_STOP_STEP = 1e-4;
+  const lastPosition = new Vector3();
+  const lastQuaternion = new Quaternion();
+
   renderer.setAnimationLoop(() => {
     // update() повертає true, поки камера рухається (інерція після жесту).
     const moved = controls.update();
+    if (moved && !interacting) {
+      const turn = lastQuaternion.angleTo(camera.quaternion);
+      const shift = lastPosition.distanceTo(camera.position) / Math.max(controls.getDistance(), 1e-3);
+      if (Math.max(turn, shift) < INERTIA_STOP_STEP) flushInertia();
+    }
     if (moved || needsRender) {
       needsRender = false;
       renderer.render(scene, camera);
+      lastPosition.copy(camera.position);
+      lastQuaternion.copy(camera.quaternion);
       frameCount += 1;
       for (const callback of frameCallbacks) callback();
     }
@@ -304,10 +338,7 @@ export function createViewer(container: HTMLElement): Viewer {
     },
     restoreView(snapshot) {
       // Спершу «доїсти» залишок інерції без анімації, потім повернути камеру.
-      const damping = controls.enableDamping;
-      controls.enableDamping = false;
-      controls.update();
-      controls.enableDamping = damping;
+      flushInertia();
       controls.target.copy(snapshot.target);
       camera.position.copy(snapshot.position);
       camera.lookAt(controls.target);
