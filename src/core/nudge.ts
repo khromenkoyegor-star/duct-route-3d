@@ -189,8 +189,12 @@ export interface StickController {
    * лише з запасом — зафіксована вісь не «перескакує» від дрібних змін перспективи.
    */
   readonly dirs: Record<HorizontalAxis, Vec2> | null;
-  /** Один кадр: джойстик, напрямки осей на екрані біля точки, час кадру (с) → крок або null. */
-  update(stick: Vec2, screen: Record<HorizontalAxis, Vec2>, dtS: number): NudgeStep | null;
+  /**
+   * Один кадр: джойстик, напрямки осей на екрані біля точки, час кадру (с) → крок або null.
+   * `only` — дозволена лише ця вісь (відрізок траси вже йде по ній): джойстик рухає точку
+   * тільки по ній, у бік проєкції відхилення на її стрілку.
+   */
+  update(stick: Vec2, screen: Record<HorizontalAxis, Vec2>, dtS: number, only?: HorizontalAxis | null): NudgeStep | null;
   release(): void;
 }
 
@@ -205,13 +209,14 @@ export function createStickController(): StickController {
     get dirs() {
       return dirs;
     },
-    update(stick, screen, dtS) {
+    update(stick, screen, dtS, only = null) {
       if (!Number.isFinite(stick.x) || !Number.isFinite(stick.y)) return null;
       // Напрямки стежать за камерою, але розкладка змінюється лише з запасом.
       const next = joystickLayout(screen, layout);
       if (!axis) {
-        axis = pickAxis(stick, next.dirs);
-        if (!axis) return null;
+        const picked = pickAxis(stick, next.dirs);
+        if (!picked) return null;
+        axis = only ?? picked;
       }
       layout = next.layout;
       dirs = next.dirs;

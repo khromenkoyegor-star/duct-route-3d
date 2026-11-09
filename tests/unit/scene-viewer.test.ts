@@ -300,6 +300,67 @@ describe('сцена: осі й масштаб', () => {
     expect(Math.abs(p.Y.x - p.origin.x)).toBeLessThan(0.5);
     s.viewer.dispose();
   });
+
+  it('projectPath(): вузли як у projectPoint; відрізок за камеру обрізається, цілком позаду — null', () => {
+    const s = setup();
+    // Камера в (0; 1; 5) дивиться на −Z.
+    s.viewer.setView({ x: 0, y: 1, z: 5 }, { x: 0, y: 1, z: 0 });
+    s.tick();
+    const path = [
+      { x: 0, y: 1, z: 0 },
+      { x: 1, y: 1, z: 0 },
+      { x: 1, y: 1, z: 10 }, // за камерою
+      { x: 1, y: 1, z: 12 }, // теж за камерою
+    ];
+    const projected = s.viewer.projectPath(path);
+    expect(projected.nodes).toHaveLength(4);
+    for (let i = 0; i < path.length; i++) {
+      const single = s.viewer.projectPoint(path[i]!);
+      expect(projected.nodes[i]!.visible).toBe(single.visible);
+      if (single.visible) {
+        expect(projected.nodes[i]!.x).toBeCloseTo(single.x, 6);
+        expect(projected.nodes[i]!.y).toBeCloseTo(single.y, 6);
+      }
+    }
+    expect(projected.segments).toHaveLength(3);
+    expect(projected.segments[0]).not.toBeNull();
+    // Другий відрізок обрізано: кінець — скінченна точка на екрані, праворуч від початку.
+    const [a, b] = projected.segments[1]!;
+    expect(Number.isFinite(b.x) && Number.isFinite(b.y)).toBe(true);
+    expect(b.x).toBeGreaterThan(a.x);
+    expect(projected.segments[2]).toBeNull();
+    s.viewer.dispose();
+  });
+
+  it('fitPoints(): усі точки — у заданій частині екрана, напрямок погляду той самий', () => {
+    const s = setup();
+    s.viewer.setView({ x: 3, y: 4, z: 6 }, { x: 0, y: 1, z: 0 });
+    s.tick();
+    const before = s.viewer.snapshotView();
+    const dirBefore = before.position.clone().sub(before.target).normalize();
+    const points = [
+      { x: -2, y: 2.4, z: -1.3 },
+      { x: 0.8, y: 2.4, z: -1.3 },
+      { x: 0.8, y: 2.4, z: 0.6 },
+      { x: 0.8, y: 0.5, z: 0.6 },
+    ];
+    // Ліва половина екрана під верхньою смугою (праву займає панель).
+    const area = { left: 0, right: 590, top: 60, bottom: 820 };
+    s.viewer.fitPoints(points, area);
+    s.tick();
+    for (const p of points) {
+      const sp = s.viewer.projectPoint(p);
+      expect(sp.visible).toBe(true);
+      expect(sp.x).toBeGreaterThan(area.left);
+      expect(sp.x).toBeLessThan(area.right);
+      expect(sp.y).toBeGreaterThan(area.top);
+      expect(sp.y).toBeLessThan(area.bottom);
+    }
+    const after = s.viewer.snapshotView();
+    const dirAfter = after.position.clone().sub(after.target).normalize();
+    expect(dirAfter.dot(dirBefore)).toBeGreaterThan(0.9999);
+    s.viewer.dispose();
+  });
 });
 
 describe('сцена: малювання тільки при змінах', () => {

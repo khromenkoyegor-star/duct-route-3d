@@ -1,5 +1,6 @@
 /**
- * Збирає інтерфейс: відкриття скану, «Показати все», «Рулетка», кнопки видів X/Y/Z.
+ * Збирає інтерфейс: відкриття скану, «Показати все», «Рулетка», «Траса», «Видалити траєкторію»,
+ * кнопки видів X/Y/Z. Одночасно працює лише один інструмент.
  * Інформація про скан (габарит, зсув, попередження) — у стані для тестів; на екрані постійно
  * не показується (на прохання Єгора), лише віконце, якщо скан завеликий для пристрою.
  */
@@ -14,10 +15,15 @@ import {
   type ScanFile,
 } from '../scene/scan-loader';
 import type { Viewer } from '../scene/viewer';
-import { createAlert, createProgress } from './dialogs';
+import { formatPointCount, type RouteSet } from '../core/route';
+import { createAlert, createChoice, createProgress } from './dialogs';
+import { closedEditorState, createPointEditor } from './point-editor';
+import { createRouteDelete } from './route-delete';
+import { createRouteTool, type RouteToolState } from './route-tool';
 import { createRuler, type RulerState } from './ruler';
-import { createToolbar } from './toolbar';
+import { createToolbar, type ToolName } from './toolbar';
 import { createViewBar } from './view-bar';
+import { freeAreaCenter } from './visibility';
 
 export interface AppState {
   /** idle — нічого не відкрито; loading — відкривається; ready — скан показано. */
@@ -25,6 +31,10 @@ export interface AppState {
   scanName: string | null;
   scanInfo: ScanInfo | null;
   ruler: RulerState;
+  /** Траси: завершені, та, що будується, і редактор точки. */
+  routes: RouteToolState;
+  /** Увімкнений інструмент. */
+  tool: ToolName;
   /** Остання помилка відкриття (для тестів). */
   error: string | null;
 }
@@ -33,6 +43,8 @@ export interface App {
   readonly state: AppState;
   /** Відкрити скан із файлів (так само, як після вибору в «Файлах»). */
   openFiles(files: readonly ScanFile[]): Promise<void>;
+  /** Підставити траси (тести; пізніше — відкриття збереженого проєкту). */
+  loadRoutes(set: RouteSet): void;
 }
 
 const PHASE_TEXT: Record<LoadPhase, string> = {
@@ -52,6 +64,8 @@ export function detectDeviceClass(): DeviceClass {
 export function createApp(root: HTMLElement, viewer: Viewer): App {
   const device = detectDeviceClass();
   let scan: LoadedScan | null = null;
+  /** Чи вже створено всі частини інтерфейсу (до того зміни трас лише записуємо в стан). */
+  let ready = false;
   const state: AppState = {
     status: 'idle',
     scanName: null,
@@ -61,8 +75,17 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       phase: 'pickA',
       points: [],
       distanceMm: null,
-      editor: { active: false, label: null, point: null, origin: null, axis: null, moved: false },
+      editor: closedEditorState(),
     },
+    routes: {
+      active: false,
+      phase: 'off',
+      set: { routes: [], nextId: 1 },
+      building: null,
+      highlight: null,
+      editor: closedEditorState(),
+    },
+    tool: 'none',
     error: null,
   };
 
@@ -74,55 +97,149 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   input.hidden = true;
   input.dataset.testid = 'file-input';
 
-  // Кнопки видів X/Y/Z. Якщо зараз доводять точку — дивимось саме на неї.
+  // Кнопки видів X/Y/Z. Якщо зараз доводять чи тягнуть точку — дивимось саме на неї.
   const viewBar = createViewBar((axis) => {
-    const editing = ruler.state.editor;
-    // Доводять точку — дивимось на неї, і вона стає посередині вільної від панелей частини екрана.
+    const editing = editor.state;
+    // Точка стає посередині вільної від панелей частини екрана (її не закриває джойстик).
     const side =
       editing.active && editing.point
-        ? viewer.viewAlong(axis, editing.point, ruler.freeAreaCenter() ?? undefined)
+        ? viewer.viewAlong(axis, editing.point, freeAreaCenter() ?? undefined)
         : viewer.viewAlong(axis);
     viewBar.setActive(axis, side);
-  });
+  }, () => viewer.showAll('current'));
   // Камеру повернули рукою — вид уже не «строго вздовж осі».
   viewer.onUserCamera(() => viewBar.setActive(null));
   const progress = createProgress();
   const alert = createAlert();
+  const choice = createChoice();
+  // Поки точку доводять, розкладка звільняє місце для джойстика (див. style.css).
+  const onEditingChange = (editing: boolean) => root.classList.toggle('is-editing-point', editing);
 
-  const ruler = createRuler(viewer, {
+  // Редактор точки один на всі інструменти (працює одночасно лише один інструмент).
+  const editor = createPointEditor(viewer);
+
+  const ruler = createRuler(viewer, editor, {
     onChange: (rulerState) => {
       state.ruler = rulerState;
     },
-    onDone: () => setRuler(false),
-    // Поки точку доводять, розкладка звільняє місце для джойстика (див. style.css).
-    onEditingChange: (editing) => root.classList.toggle('is-editing-point', editing),
+    onDone: () => requestTool('none'),
+    onEditingChange,
   });
+
+  const route = createRouteTool(viewer, editor, {
+    onChange: (routeState) => {
+      state.routes = routeState;
+      syncRouteUi();
+    },
+    onClose: () => requestTool('none'),
+    onEditingChange,
+  });
+
+  const routeDelete = createRouteDelete({
+    onSelect: (id) => {
+      route.setHighlight(id);
+      // Вибрану трасу має бути видно цілком (на iPhone її легко закриває сам список).
+      if (id !== null) route.reveal(id);
+    },
+    onDelete: (id) => {
+      route.remove(id);
+      // Трас не лишилось — список закривається.
+      if (route.state.set.routes.length === 0) requestTool('none');
+    },
+    onClose: () => requestTool('none'),
+  });
+
+  /** Кнопка інструмента: увімкнути або (повторне натискання) вимкнути. */
+  const toggleTool = (tool: ToolName) => {
+    // Другий дотик подвійного натискання «Підтвердити точку» міг упасти на кнопку.
+    if (ruler.recentlyConfirmed()) return;
+    requestTool(state.tool === tool ? 'none' : tool);
+  };
 
   const toolbar = createToolbar({
-    onOpen: () => input.click(),
-    onShowAll: () => viewer.showAll('current'),
-    onRuler: () => {
-      // Другий дотик подвійного натискання «Підтвердити точку» міг упасти на цю кнопку.
-      if (ruler.recentlyConfirmed()) return;
-      setRuler(!ruler.state.active);
+    onOpen: () => {
+      const building = route.state.building;
+      const hasRoutes = route.state.set.routes.length > 0 || (building?.nodes.length ?? 0) > 0;
+      if (!hasRoutes) {
+        input.click();
+        return;
+      }
+      // Траси належать скану; збереження проєкту буде пізніше (етап 6).
+      choice.show('Відкрити інший скан?', 'Усі траси в цій сцені буде видалено.', [
+        { label: 'Скасувати', role: 'cancel', testid: 'choice-cancel' },
+        // «Файли» відкриваються прямо в обробнику натискання — інакше iOS їх не покаже.
+        { label: 'Відкрити', role: 'destructive', testid: 'choice-open', onSelect: () => input.click() },
+      ]);
     },
+    onShowAll: () => viewer.showAll('current'),
+    onRuler: () => toggleTool('ruler'),
+    onRoute: () => toggleTool('route'),
+    onRouteDelete: () => toggleTool('delete'),
   });
 
-  function setRuler(active: boolean): void {
-    ruler.setActive(active);
-    toolbar.setRulerActive(active);
-    root.classList.toggle('is-ruler', active);
+  // Інтерфейс створено — тепер зміни трас можна показувати на кнопках і в списку.
+  ready = true;
+  syncRouteUi();
+
+  /** Кнопка «Видалити траєкторію» активна, лише коли є траси; відкритий список — актуальний. */
+  function syncRouteUi(): void {
+    if (!ready) return;
+    toolbar.setHasRoutes(state.routes.set.routes.length > 0);
+    if (routeDelete.open) routeDelete.show(state.routes.set.routes);
+  }
+
+  /** Увімкнути інструмент (решта вимикаються). */
+  function applyTool(next: ToolName): void {
+    state.tool = next;
+    ruler.setActive(next === 'ruler');
+    route.setActive(next === 'route');
+    if (next === 'delete') routeDelete.show(route.state.set.routes);
+    else routeDelete.hide();
+    route.setHighlight(null);
+    toolbar.setActiveTool(next);
+    root.classList.toggle('is-ruler', next === 'ruler');
+    root.classList.toggle('is-route', next === 'route');
+    root.classList.toggle('is-route-delete', next === 'delete');
+  }
+
+  /**
+   * Перемкнути інструмент. Якщо йде побудова траси з ≥ 2 точками — спершу питаємо,
+   * зберегти її чи видалити (або лишитись у побудові).
+   */
+  function requestTool(next: ToolName): void {
+    if (next === state.tool) return;
+    const building = route.state.building;
+    if (state.tool === 'route' && building && building.nodes.length >= 2) {
+      choice.show(`Траса ${building.id} не завершена`, `У ній ${formatPointCount(building.nodes.length)}. Зберегти її?`, [
+        {
+          label: 'Зберегти трасу',
+          testid: 'choice-save',
+          onSelect: () => {
+            route.finish();
+            applyTool(next);
+          },
+        },
+        { label: 'Видалити трасу', role: 'destructive', testid: 'choice-discard', onSelect: () => applyTool(next) },
+        { label: 'Скасувати', role: 'cancel', testid: 'choice-cancel' },
+      ]);
+      return;
+    }
+    applyTool(next);
   }
 
   root.append(
+    route.layer,
     ruler.overlay,
-    ruler.editorOverlay,
+    editor.overlay,
     viewBar.element,
     toolbar.element,
     ruler.panel,
-    ruler.editor,
+    route.panel,
+    routeDelete.element,
+    editor.element,
     progress.element,
     alert.element,
+    choice.element,
     input,
   );
 
@@ -132,7 +249,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     state.status = 'loading';
     state.error = null;
     toolbar.setBusy(true);
-    setRuler(false);
     const sizeText = formatBytes(files.reduce((sum, f) => sum + f.size, 0));
     const showPhase = (phase: LoadPhase) => progress.show(PHASE_TEXT[phase], sizeText);
     showPhase('reading');
@@ -148,14 +264,18 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         throw error;
       }
 
-      // 2. Звільняємо пам'ять від попереднього скану — два великі скани одночасно
-      //    можуть не вміститися в пам'ять iPhone.
+      // 2. Файл підходить — вимикаємо інструменти (невдалий файл нічого не скидає: поки він
+      //    готується, екран закрито індикатором). Звільняємо пам'ять від попереднього скану —
+      //    два великі скани одночасно можуть не вміститися в пам'ять iPhone.
+      applyTool('none');
       if (scan) {
         viewer.setScan(null);
         scan.dispose();
         scan = null;
         closedPrevious = true;
       }
+      // Траси належали попередньому скану.
+      route.clearAll();
       state.scanName = null;
       state.scanInfo = null;
       toolbar.setScanLoaded(false);
@@ -209,5 +329,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       return state;
     },
     openFiles,
+    loadRoutes: (set) => route.load(set),
   };
 }

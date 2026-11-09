@@ -80,3 +80,79 @@ export function createAlert(): Alert {
     },
   };
 }
+
+export interface ChoiceButton {
+  label: string;
+  /** cancel — «Скасувати» (звичайний шрифт), destructive — червона, default — жирна. */
+  role?: 'default' | 'cancel' | 'destructive';
+  testid?: string;
+  /** Викликається одразу в обробнику натискання (важливо для відкриття «Файлів» на iOS). */
+  onSelect?(): void;
+}
+
+export interface Choice {
+  element: HTMLElement;
+  readonly open: boolean;
+  /** Віконце-питання з кнопками: дві — поруч, більше — одна під одною (як в iOS). */
+  show(title: string, message: string, buttons: readonly ChoiceButton[]): void;
+  hide(): void;
+}
+
+export function createChoice(): Choice {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'backdrop';
+  backdrop.dataset.testid = 'choice';
+  backdrop.hidden = true;
+  const card = document.createElement('div');
+  card.className = 'card card--alert card--choice';
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  const title = document.createElement('h2');
+  title.className = 'card-title';
+  title.id = 'choice-title';
+  const text = document.createElement('p');
+  text.className = 'card-text';
+  text.id = 'choice-text';
+  text.dataset.testid = 'choice-text';
+  card.setAttribute('aria-labelledby', title.id);
+  card.setAttribute('aria-describedby', text.id);
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  card.append(title, text, actions);
+  backdrop.append(card);
+
+  const hide = () => {
+    backdrop.hidden = true;
+    actions.replaceChildren();
+  };
+
+  return {
+    element: backdrop,
+    get open() {
+      return !backdrop.hidden;
+    },
+    show(heading, message, buttons) {
+      title.textContent = heading;
+      text.textContent = message;
+      actions.classList.toggle('card-actions--row', buttons.length === 2);
+      actions.replaceChildren(
+        ...buttons.map((b) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `card-button card-button--${b.role ?? 'default'}`;
+          if (b.testid) button.dataset.testid = b.testid;
+          button.textContent = b.label;
+          button.addEventListener('click', () => {
+            hide();
+            b.onSelect?.();
+          });
+          return button;
+        }),
+      );
+      backdrop.hidden = false;
+      const preferred = actions.querySelector<HTMLButtonElement>('.card-button--cancel') ?? actions.querySelector('button');
+      preferred?.focus({ focusVisible: false } as FocusOptions);
+    },
+    hide,
+  };
+}
