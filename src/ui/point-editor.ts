@@ -71,8 +71,14 @@ export interface PointEditor {
   /** Стрілки осей біля точки. */
   overlay: HTMLElement;
   readonly state: PointEditorState;
-  /** Почати доведення точки (або замінити точку, якщо редагування вже йде). */
-  edit(point: PointM, label: string, options?: EditOptions): void;
+  /**
+   * Почати доведення точки (або замінити точку, якщо редагування вже йде).
+   * Редактор один на всі інструменти: `handlers` — того інструмента, що зараз доводить точку.
+   * Якщо в цю мить ще тримають джойстик чи повзунок, нова точка від цього утримання не поїде.
+   */
+  edit(point: PointM, label: string, handlers: PointEditorHandlers, options?: EditOptions): void;
+  /** Чи редактор зараз доводить точку саме для цього інструмента. */
+  ownedBy(handlers: PointEditorHandlers): boolean;
   /**
    * Коротке пояснення біля джойстика (замість рядка «Відрізок / Зсув») — на кілька секунд
    * або доки точку не зрушать. wiggle — «посмикати» кульки джойстика й повзунка: тягнути — ними.
@@ -120,7 +126,7 @@ function coordinates(point: PointM): Array<string | HTMLElement> {
   return parts;
 }
 
-export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers): PointEditor {
+export function createPointEditor(viewer: Viewer): PointEditor {
   const element = document.createElement('div');
   element.className = 'point-editor';
   element.dataset.testid = 'point-editor';
@@ -148,6 +154,8 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   confirm.dataset.testid = 'confirm-point';
   confirm.textContent = 'Підтвердити точку';
 
+  /** Інструмент, для якого зараз доводять точку (null — редактор закрито). */
+  let handlers: PointEditorHandlers | null = null;
   let point: PointM | null = null;
   let origin: PointM | null = null;
   let label: string | null = null;
@@ -223,7 +231,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     }
     if (changed) {
       clearNotice();
-      handlers.onChange(point);
+      handlers?.onChange(point);
       viewer.requestRender();
     }
     render();
@@ -249,7 +257,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
     stick.setKnobAxis(null);
     slider.setKnobAxis(null);
     render();
-    if (wasRunning && point) handlers.onSettle?.(point);
+    if (wasRunning && point) handlers?.onSettle?.(point);
   };
 
   const stick = createStick({
@@ -412,9 +420,11 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   function segmentText(locked: NudgeAxis | null): string {
     if (blockedBack) return 'Назад по попередньому відрізку не можна';
     if (!segment || !point || !locked) return 'Тягніть джойстиком (X, Z) чи повзунком (Y)';
-    const key = locked.toLowerCase() as 'x' | 'y' | 'z';
+    const key = AXIS_KEY[locked];
     const offset = mToMm(point[key] - segment.anchor[key]);
-    return `Відрізок: ${locked} ${offset > 0 ? '+' : '−'}${formatMm(Math.abs(offset))}`;
+    const text = `Відрізок: ${locked} ${offset > 0 ? '+' : '−'}${formatMm(Math.abs(offset))}`;
+    // Підпис округлено до 0,1 мм — пояснюємо, чому «Підтвердити» ще неактивна.
+    return canConfirm() ? text : `${text} — закороткий`;
   }
 
   function showNotice(text: string, wiggle = false): void {
@@ -441,7 +451,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
   confirm.addEventListener('click', () => {
     if (!point || !canConfirm()) return;
     const confirmed = point;
-    handlers.onConfirm(confirmed);
+    handlers?.onConfirm(confirmed);
   });
 
   return {
@@ -460,7 +470,15 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
         canConfirm: canConfirm(),
       };
     },
-    edit(next, nextLabel, options = {}) {
+    ownedBy(owner) {
+      return handlers === owner && !element.hidden;
+    },
+    edit(next, nextLabel, owner, options = {}) {
+      // Утримання, що триває (наприклад, «Підтвердити» натиснули другим пальцем), нову точку
+      // не рухає: цикл зупинено, вісь знято, час руху скинуто. Рух — з наступного натискання.
+      stopLoop(false);
+      lastTime = 0;
+      handlers = owner;
       segment = options.segment ? { anchor: { ...options.segment.anchor }, back: options.segment.back } : null;
       // У режимі відрізка точка завжди стартує в попередньому вузлі.
       point = segment ? { ...segment.anchor } : { ...next };
@@ -484,6 +502,7 @@ export function createPointEditor(viewer: Viewer, handlers: PointEditorHandlers)
       label = null;
       customTitle = null;
       segment = null;
+      handlers = null;
       clearNotice();
       element.hidden = true;
       overlay.hidden = true;

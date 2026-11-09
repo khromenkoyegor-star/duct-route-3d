@@ -26,7 +26,7 @@ import {
 } from '../core/route';
 import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
-import { createPointEditor, type PointEditorState } from './point-editor';
+import { closedEditorState, type PointEditor, type PointEditorHandlers, type PointEditorState } from './point-editor';
 import { createRouteLayer } from './route-layer';
 import { createRetapGuard, HINT_CONFIRM_MOVE, onTap } from './tap';
 import { freeAreaRect, keepVisible } from './visibility';
@@ -50,8 +50,6 @@ export interface RouteTool {
   panel: HTMLElement;
   /** Траси на сцені (лінії, вузли, номери). */
   layer: HTMLElement;
-  editor: HTMLElement;
-  editorOverlay: HTMLElement;
   readonly state: RouteToolState;
   setActive(active: boolean): void;
   /** Завершити трасу, яку будують (якщо в ній ≥ 2 точки). true — збережено. */
@@ -97,8 +95,10 @@ function panelButton(testid: string, full: string, short: string, primary = fals
   return button;
 }
 
+/** editor — спільний редактор точки (джойстик, повзунок, «Підтвердити точку»); див. app.ts. */
 export function createRouteTool(
   viewer: Viewer,
+  editor: PointEditor,
   handlers: {
     onChange?(state: RouteToolState): void;
     onClose?(): void;
@@ -155,7 +155,7 @@ export function createRouteTool(
 
   const editorTitle = () => `Траса ${set.nextId} · точка ${nodes.length + 1}`;
 
-  const editor = createPointEditor(viewer, {
+  const editing: PointEditorHandlers = {
     onChange(point) {
       pending = point;
       render();
@@ -172,14 +172,16 @@ export function createRouteTool(
       keepVisible(viewer, point);
       render();
     },
-  });
+  };
+  /** Чи редактор зараз доводить точку траси. */
+  const owns = () => editor.ownedBy(editing);
 
   /** Наступна точка: стартує в останньому вузлі, назад по останньому відрізку — не можна. */
   function startPull(): void {
     const anchor = nodes.at(-1)!;
     phase = 'pull';
     pending = { ...anchor };
-    editor.edit(anchor, '', { title: editorTitle(), segment: { anchor, back: lastDirection(nodes) } });
+    editor.edit(anchor, '', editing, { title: editorTitle(), segment: { anchor, back: lastDirection(nodes) } });
     handlers.onEditingChange?.(true);
     if (!pullShown) {
       pullShown = true;
@@ -193,7 +195,7 @@ export function createRouteTool(
     set,
     building: active ? { id: set.nextId, nodes: nodes.map(toMm) } : null,
     highlight,
-    editor: editor.state,
+    editor: owns() ? editor.state : closedEditorState(),
   });
 
   function render(): void {
@@ -216,14 +218,14 @@ export function createRouteTool(
     finishButton.disabled = nodes.length < 2;
     routeLayer.update({
       routes: set.routes,
-      draft: active ? { id: set.nextId, nodes, pending: editor.state.active ? pending : null } : null,
+      draft: active ? { id: set.nextId, nodes, pending: owns() ? pending : null } : null,
       highlight,
     });
     handlers.onChange?.(state());
   }
 
   const closeEditor = () => {
-    if (!editor.state.active) return;
+    if (!owns()) return;
     editor.close();
     handlers.onEditingChange?.(false);
   };
@@ -283,7 +285,7 @@ export function createRouteTool(
       const hit = viewer.raycastScan(x, y);
       missed = !hit;
       if (hit) {
-        if (phase === 'editFirst' && editor.state.moved && !retap.confirm(x, y)) {
+        if (phase === 'editFirst' && owns() && editor.state.moved && !retap.confirm(x, y)) {
           render();
           return;
         }
@@ -291,7 +293,7 @@ export function createRouteTool(
         const point = { x: hit.x, y: hit.y, z: hit.z };
         phase = 'editFirst';
         pending = point;
-        editor.edit(point, '', { title: editorTitle() });
+        editor.edit(point, '', editing, { title: editorTitle() });
         handlers.onEditingChange?.(true);
         keepVisible(viewer, point);
       }
@@ -304,8 +306,6 @@ export function createRouteTool(
   return {
     panel,
     layer: routeLayer.element,
-    editor: editor.element,
-    editorOverlay: editor.overlay,
     get state() {
       return state();
     },
@@ -365,7 +365,6 @@ export function createRouteTool(
     dispose() {
       retap.clear();
       stopTap();
-      editor.dispose();
       routeLayer.dispose();
       panel.remove();
     },

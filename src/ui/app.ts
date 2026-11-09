@@ -17,7 +17,7 @@ import {
 import type { Viewer } from '../scene/viewer';
 import { formatPointCount, type RouteSet } from '../core/route';
 import { createAlert, createChoice, createProgress } from './dialogs';
-import { closedEditorState } from './point-editor';
+import { closedEditorState, createPointEditor } from './point-editor';
 import { createRouteDelete } from './route-delete';
 import { createRouteTool, type RouteToolState } from './route-tool';
 import { createRuler, type RulerState } from './ruler';
@@ -99,7 +99,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
 
   // Кнопки видів X/Y/Z. Якщо зараз доводять чи тягнуть точку — дивимось саме на неї.
   const viewBar = createViewBar((axis) => {
-    const editing = ruler.state.editor.active ? ruler.state.editor : route.state.editor;
+    const editing = editor.state;
     // Точка стає посередині вільної від панелей частини екрана (її не закриває джойстик).
     const side =
       editing.active && editing.point
@@ -115,7 +115,10 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   // Поки точку доводять, розкладка звільняє місце для джойстика (див. style.css).
   const onEditingChange = (editing: boolean) => root.classList.toggle('is-editing-point', editing);
 
-  const ruler = createRuler(viewer, {
+  // Редактор точки один на всі інструменти (працює одночасно лише один інструмент).
+  const editor = createPointEditor(viewer);
+
+  const ruler = createRuler(viewer, editor, {
     onChange: (rulerState) => {
       state.ruler = rulerState;
     },
@@ -123,7 +126,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     onEditingChange,
   });
 
-  const route = createRouteTool(viewer, {
+  const route = createRouteTool(viewer, editor, {
     onChange: (routeState) => {
       state.routes = routeState;
       syncRouteUi();
@@ -227,15 +230,13 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   root.append(
     route.layer,
     ruler.overlay,
-    ruler.editorOverlay,
-    route.editorOverlay,
+    editor.overlay,
     viewBar.element,
     toolbar.element,
     ruler.panel,
     route.panel,
     routeDelete.element,
-    ruler.editor,
-    route.editor,
+    editor.element,
     progress.element,
     alert.element,
     choice.element,
@@ -248,7 +249,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     state.status = 'loading';
     state.error = null;
     toolbar.setBusy(true);
-    applyTool('none');
     const sizeText = formatBytes(files.reduce((sum, f) => sum + f.size, 0));
     const showPhase = (phase: LoadPhase) => progress.show(PHASE_TEXT[phase], sizeText);
     showPhase('reading');
@@ -264,8 +264,10 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         throw error;
       }
 
-      // 2. Звільняємо пам'ять від попереднього скану — два великі скани одночасно
-      //    можуть не вміститися в пам'ять iPhone.
+      // 2. Файл підходить — вимикаємо інструменти (невдалий файл нічого не скидає: поки він
+      //    готується, екран закрито індикатором). Звільняємо пам'ять від попереднього скану —
+      //    два великі скани одночасно можуть не вміститися в пам'ять iPhone.
+      applyTool('none');
       if (scan) {
         viewer.setScan(null);
         scan.dispose();

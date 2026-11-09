@@ -12,7 +12,7 @@ import { Vector3 } from 'three';
 import type { PointM } from '../core/nudge';
 import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
-import { createPointEditor, type PointEditorState } from './point-editor';
+import { closedEditorState, type PointEditor, type PointEditorHandlers, type PointEditorState } from './point-editor';
 import { createRetapGuard, HINT_CONFIRM_MOVE, onTap } from './tap';
 import { keepVisible } from './visibility';
 
@@ -35,10 +35,6 @@ export interface Ruler {
   panel: HTMLElement;
   /** Шар з лінією, маркерами точок і підписом відстані. */
   overlay: HTMLElement;
-  /** Редактор точки: джойстик, повзунок, «Підтвердити точку». */
-  editor: HTMLElement;
-  /** Стрілки осей біля точки, яку доводять. */
-  editorOverlay: HTMLElement;
   readonly state: RulerState;
   /** Щойно підтвердили точку (захист від подвійного натискання). */
   recentlyConfirmed(): boolean;
@@ -65,8 +61,10 @@ const LABELS = ['А', 'Б'] as const;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/** editor — спільний редактор точки (джойстик, повзунок, «Підтвердити точку»); див. app.ts. */
 export function createRuler(
   viewer: Viewer,
+  editor: PointEditor,
   handlers: { onChange?(state: RulerState): void; onDone?(): void; onEditingChange?(editing: boolean): void } = {},
 ): Ruler {
   const panel = document.createElement('div');
@@ -135,7 +133,7 @@ export function createRuler(
 
   const editingIndex = () => (phase === 'editA' ? 0 : phase === 'editB' ? 1 : -1);
 
-  const editor = createPointEditor(viewer, {
+  const editing: PointEditorHandlers = {
     onChange(point) {
       const i = editingIndex();
       if (i < 0) return;
@@ -157,7 +155,9 @@ export function createRuler(
       keepVisible(viewer, point);
       render();
     },
-  });
+  };
+  /** Чи редактор зараз доводить точку рулетки. */
+  const owns = () => editor.ownedBy(editing);
 
   const state = (): RulerState => {
     const [a, b] = points;
@@ -166,7 +166,7 @@ export function createRuler(
       phase,
       points: points.map((p) => ({ x: p.x, y: p.y, z: p.z })),
       distanceMm: a && b ? mToMm(a.distanceTo(b)) : null,
-      editor: editor.state,
+      editor: owns() ? editor.state : closedEditorState(),
     };
   };
 
@@ -231,7 +231,7 @@ export function createRuler(
   const startEditing = (index: 0 | 1, hit: Vector3) => {
     points = index === 0 ? [hit] : [points[0]!, hit];
     phase = index === 0 ? 'editA' : 'editB';
-    editor.edit({ x: hit.x, y: hit.y, z: hit.z }, LABELS[index]);
+    editor.edit({ x: hit.x, y: hit.y, z: hit.z }, LABELS[index], editing);
     handlers.onEditingChange?.(true);
     keepVisible(viewer, hit);
   };
@@ -248,8 +248,7 @@ export function createRuler(
       missed = !hit;
       if (hit) {
         // Підсунуту точку випадковий дотик не переносить: потрібен другий дотик у тому самому місці.
-        const editing = phase === 'editA' || phase === 'editB';
-        if (editing && editor.state.moved && !retap.confirm(x, y)) {
+        if (owns() && editor.state.moved && !retap.confirm(x, y)) {
           render();
           return;
         }
@@ -266,7 +265,7 @@ export function createRuler(
     phase = 'pickA';
     missed = false;
     retap.clear();
-    if (editor.state.active) {
+    if (owns()) {
       editor.close();
       handlers.onEditingChange?.(false);
     }
@@ -277,8 +276,6 @@ export function createRuler(
   return {
     panel,
     overlay,
-    editor: editor.element,
-    editorOverlay: editor.overlay,
     get state() {
       return state();
     },
@@ -296,7 +293,6 @@ export function createRuler(
       retap.clear();
       stopTap();
       stopFrames();
-      editor.dispose();
       panel.remove();
       overlay.remove();
     },

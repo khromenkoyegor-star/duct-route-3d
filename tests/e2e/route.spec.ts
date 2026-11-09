@@ -243,6 +243,8 @@ test.describe('Траса: побудова полілінії', () => {
     await expect(page.getByTestId('route-row-2')).toHaveCount(0);
     await page.getByTestId('route-delete-close').click();
 
+    // Вибір у списку міг повернути камеру (показати трасу цілком) — ставимо вид знову.
+    await page.evaluate(() => window.__trasa!.viewer.setView({ x: 2.5, y: 4, z: 9 }, { x: 0, y: 0.8, z: 0 }));
     await startRoute(page);
     await expect(page.getByTestId('route-title')).toHaveText('Траса 4');
     await confirm(page);
