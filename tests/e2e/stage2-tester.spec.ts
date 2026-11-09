@@ -362,7 +362,7 @@ function pathVertices(d: string): V2[] {
 
 /**
  * Намальоване = дані: лінія траси, яку будують, проходить через вузли building.nodes (±0,5 px),
- * кружечків стільки, скільки вузлів, підпис довжини кожного видимого відрізка = відстань між вузлами (±0,1 мм),
+ * кружечки — на вузлах (злиті на екрані не малюються), підпис довжини кожного видимого відрізка = відстань між вузлами (±0,1 мм),
  * номер траси — біля першої точки.
  */
 async function expectDrawingMatchesData(page: Page, where = '') {
@@ -381,9 +381,19 @@ async function expectDrawingMatchesData(page: Page, where = '') {
       expect(Math.abs(p.y - proj.nodes[i]!.y), `${where} вузол ${i} y`).toBeLessThan(0.5);
     });
   }
-  // Кружечки: по одному на кожен видимий вузол (кожен — дві дуги «a»).
-  const visibleNodes = proj.nodes.slice(0, nodesMm.length).filter((n) => n.visible).length;
-  expect((d.nodes.match(/a/g) ?? []).length).toBe(visibleNodes * 2);
+  // Кружечки (кожен — «M x y» і дві дуги «a»): кожен стоїть рівно на якомусь видимому вузлі;
+  // вузли, що на екрані ближчі за 10 px до вже намальованого, не малюються (route-layer.ts);
+  // останній видимий вузол — завжди.
+  const visible = proj.nodes.slice(0, nodesMm.length).filter((n) => n.visible);
+  const centres = [...d.nodes.matchAll(/M(-?[\d.]+) (-?[\d.]+)a/g)].map((m) => ({ x: Number(m[1]) + 6, y: Number(m[2]) }));
+  expect(centres.length).toBeLessThanOrEqual(visible.length);
+  if (visible.length > 0) expect(centres.length).toBeGreaterThan(0);
+  for (const c of centres) {
+    const nearest = Math.min(...visible.map((n) => Math.hypot(n.x - c.x, n.y - c.y)));
+    expect(nearest, `${where} кружечок не на вузлі`).toBeLessThan(0.5);
+  }
+  const last = visible.at(-1);
+  if (last) expect(centres.some((c) => Math.hypot(c.x - last.x, c.y - last.y) < 0.5), `${where} останній вузол`).toBe(true);
   // Підписи довжин: кожен — посередині якогось відрізка, текст = відстань між його вузлами.
   for (const label of d.labels) {
     let best = -1;

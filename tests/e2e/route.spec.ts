@@ -334,7 +334,7 @@ test.describe('Траса: побудова полілінії', () => {
     expect(after.editor.point).toEqual(before.editor.point);
   });
 
-  test('траса на 600 точок: малюється, а кадр з нею не довший за кадр без неї більше ніж на 8 мс', async ({ page }) => {
+  test('траса на 600 точок: малюється, а робота програми за кадр з нею довша не більше ніж на 8 мс', async ({ page }) => {
     await openRoom(page);
     // Сходинки 600 точок у кімнаті: по X і по Z почергово, крок 5 мм.
     const nodes: P3[] = [];
@@ -342,27 +342,36 @@ test.describe('Траса: побудова полілінії', () => {
       const step = Math.floor(i / 2);
       nodes.push({ x: -1500 + (step + (i % 2)) * 5, y: 1200, z: -1000 + step * 5 });
     }
+    // Час обробників кадру (сцена, шар трас), без малювання самим браузером: на сервері CI браузер
+    // малює без відеокарти, і повний час кадру там нічого не каже про iPad.
     const measure = () =>
       page.evaluate(async () => {
         const viewer = window.__trasa!.viewer;
-        const layer = document.querySelector('[data-testid="route-layer"]')!;
-        let total = 0;
+        const raf = window.requestAnimationFrame.bind(window);
+        let busy = 0;
+        window.requestAnimationFrame = (cb) =>
+          raf((t) => {
+            const t0 = performance.now();
+            cb(t);
+            busy += performance.now() - t0;
+          });
+        const frames0 = viewer.frameCount;
         for (let i = 0; i < 40; i++) {
           const a = (i / 40) * Math.PI * 2;
           viewer.setView({ x: Math.sin(a) * 7, y: 4, z: Math.cos(a) * 7 }, { x: 0, y: 1, z: 0 });
-          const t0 = performance.now();
-          // Кадр сцени й шар трас — синхронно (без очікування requestAnimationFrame).
-          viewer.requestRender();
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-          total += performance.now() - t0;
+          await new Promise((resolve) => raf(() => raf(resolve)));
         }
-        return { avg: total / 40, paths: layer.querySelectorAll('path').length };
+        window.requestAnimationFrame = raf;
+        const frames = Math.max(1, viewer.frameCount - frames0);
+        const layer = document.querySelector('[data-testid="route-layer"]')!;
+        return { perFrame: busy / frames, frames, paths: layer.querySelectorAll('path').length };
       });
     const without = await measure();
     await page.evaluate((n) => window.__trasa!.app!.loadRoutes({ routes: [{ id: 1, nodes: n }], nextId: 2 }), nodes);
     const withRoute = await measure();
     expect(withRoute.paths).toBeGreaterThan(0);
-    expect(withRoute.avg - without.avg).toBeLessThan(8);
+    expect(withRoute.frames).toBeGreaterThanOrEqual(20);
+    expect(withRoute.perFrame - without.perFrame).toBeLessThan(8);
   });
 });
 

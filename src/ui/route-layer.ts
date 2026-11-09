@@ -75,14 +75,38 @@ function linePath(segments: ProjectedPath['segments'], from = 0, to = segments.l
   return d;
 }
 
+/**
+ * Вузли, що на екрані ближчі за це до вже намальованого, не малюємо: вони однаково зливаються
+ * в одну пляму, а сотні кружечків на довгій трасі здалеку лише гальмують малювання.
+ * Наблизиш камеру — вузли розійдуться й з'являться.
+ */
+const NODE_MIN_GAP_PX = 10;
+
 function circlesPath(nodes: ProjectedPath['nodes'], count = nodes.length): string {
   let d = '';
+  let last: ScreenPoint | null = null;
   for (let i = 0; i < count; i++) {
     const n = nodes[i]!;
     if (!n.visible) continue;
+    // Останній вузол (звідки тягнуть наступну точку) — завжди.
+    if (last && i < count - 1 && Math.hypot(n.x - last.x, n.y - last.y) < NODE_MIN_GAP_PX) continue;
     d += `M${fmt(n.x - NODE_R)} ${fmt(n.y)}a${NODE_R} ${NODE_R} 0 1 0 ${NODE_R * 2} 0a${NODE_R} ${NODE_R} 0 1 0 ${-NODE_R * 2} 0`;
+    last = n;
   }
   return d;
+}
+
+interface DrawJob {
+  key: string;
+  id: number;
+  nodes: readonly PointM[];
+  pending: PointM | null;
+  withLengths: boolean;
+  /** nodes + pending. */
+  all: readonly PointM[];
+  projected: ProjectedPath;
+  /** Куди від першої точки ставити номер (null — перша точка не видна). */
+  tagDir: ScreenPoint | null;
 }
 
 export function createRouteLayer(viewer: Viewer): RouteLayer {
@@ -145,10 +169,18 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     label.style.transform = `translate(${fmt((a.x + b.x) / 2)}px, ${fmt((a.y + b.y) / 2)}px) translate(-50%, -50%)`;
   };
 
-  const drawOne = (key: string, id: number, nodes: readonly PointM[], pending: PointM | null, withLengths: boolean) => {
-    const p = partsFor(key);
+  /** Читання: проєкції й напрямок номера (лише обчислення, DOM не змінюється). */
+  const prepare = (key: string, id: number, nodes: readonly PointM[], pending: PointM | null, withLengths: boolean): DrawJob => {
     const all = pending ? [...nodes, pending] : nodes;
     const projected = viewer.projectPath(all);
+    const first = projected.nodes[0];
+    const tagDir = first?.visible ? tagDirection(first, projected.nodes[1], all[0]!) : null;
+    return { key, id, nodes, pending, withLengths, all, projected, tagDir };
+  };
+
+  /** Запис: оновити лінії, вузли, номер і підписи однієї траси. */
+  const apply = ({ key, id, nodes, pending, withLengths, all, projected, tagDir }: DrawJob) => {
+    const p = partsFor(key);
     const confirmedSegments = Math.max(0, nodes.length - 1);
     const d = linePath(projected.segments, 0, confirmedSegments);
     p.halo.setAttribute('d', d + (pending ? linePath(projected.segments, confirmedSegments) : ''));
@@ -171,10 +203,9 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     p.tag.classList.toggle('route-tag--highlight', highlighted);
     p.tag.classList.toggle('route-tag--dim', dim);
     p.tag.classList.toggle('route-tag--background', background);
-    if (first?.visible) {
-      const away = tagDirection(first, projected.nodes[1], all[0]!);
+    if (first?.visible && tagDir) {
       p.tag.style.transform =
-        `translate(${fmt(first.x + away.x * TAG_OFFSET_PX)}px, ${fmt(first.y + away.y * TAG_OFFSET_PX)}px) translate(-50%, -50%)`;
+        `translate(${fmt(first.x + tagDir.x * TAG_OFFSET_PX)}px, ${fmt(first.y + tagDir.y * TAG_OFFSET_PX)}px) translate(-50%, -50%)`;
     }
     if (!withLengths) return;
     for (let i = 1; i < all.length; i++) {
@@ -214,24 +245,25 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
 
   const draw = () => {
     labelCount = 0;
-    const seen = new Set<string>();
+    // Спершу всі проєкції (читання розмірів екрана), потім усі зміни DOM: інакше браузер
+    // перераховував би розкладку сторінки посеред кадру для кожної траси.
+    const jobs: DrawJob[] = [];
     for (const route of data.routes) {
       let nodes = metres.get(route);
       if (!nodes) {
         nodes = route.nodes.map(toM);
         metres.set(route, nodes);
       }
-      const key = `route-${route.id}`;
-      seen.add(key);
-      drawOne(key, route.id, nodes, null, false);
+      jobs.push(prepare(`route-${route.id}`, route.id, nodes, null, false));
     }
     const draft = data.draft;
     if (draft && (draft.nodes.length > 0 || draft.pending)) {
-      seen.add('draft');
       // Поки першу точку лише ставлять, лінії ще немає — показуємо саму точку й номер траси.
-      if (draft.nodes.length > 0) drawOne('draft', draft.id, draft.nodes, draft.pending, true);
-      else drawOne('draft', draft.id, [draft.pending!], null, false);
+      if (draft.nodes.length > 0) jobs.push(prepare('draft', draft.id, draft.nodes, draft.pending, true));
+      else jobs.push(prepare('draft', draft.id, [draft.pending!], null, false));
     }
+    const seen = new Set(jobs.map((j) => j.key));
+    for (const job of jobs) apply(job);
     for (const [key, p] of parts) {
       if (seen.has(key)) continue;
       p.group.remove();
