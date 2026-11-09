@@ -410,3 +410,20 @@ test.describe('Скріншоти етапу 2', () => {
     });
   }
 });
+
+test.describe('Траса: вигляд кнопок', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`«Завершити побудову траєкторії» — головна (синя) кнопка (${colorScheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme });
+      await openRoom(page);
+      await startRoute(page);
+      const background = (id: string) => page.getByTestId(id).evaluate((el) => getComputedStyle(el).backgroundColor);
+      const finish = await background('route-finish');
+      const remove = await background('route-remove-last');
+      expect(finish).not.toBe(remove);
+      // Синій (системний tint): синя складова помітно більша за червону.
+      const [r, , b] = finish.match(/\d+/g)!.map(Number);
+      expect(b!).toBeGreaterThan(r! + 100);
+    });
+  }
+});

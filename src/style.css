@@ -1776,6 +1776,12 @@ body {
   background: var(--solid-fill);
 }
 
+/* Головна дія панелі («Завершити побудову траєкторії») лишається синьою. */
+.panel-button--primary {
+  background: var(--tint);
+  color: var(--tint-label);
+}
+
 .route-row--selected {
   background: var(--solid-panel-bg);
 }
