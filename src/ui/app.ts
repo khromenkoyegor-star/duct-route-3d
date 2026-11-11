@@ -54,6 +54,9 @@ export interface DuctsState {
   routes: Array<{ id: number; duct: DuctSpec | null; sections: string[]; problems: DuctProblem[] }>;
   /** Трикутників у всіх повітропроводах (перевірка, що пам'ять звільняється). */
   triangles: number;
+  /** Скільки разів будувались 3D-моделі трас і скільки їх на сцені (перевірка швидкодії). */
+  builds: number;
+  meshes: number;
 }
 
 export interface App {
@@ -107,7 +110,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       editor: closedEditorState(),
     },
     tool: 'none',
-    ducts: { mode: 'both', transparency: 0, selection: null, routes: [], triangles: 0 },
+    ducts: { mode: 'both', transparency: 0, selection: null, routes: [], triangles: 0, builds: 0, meshes: 0 },
     error: null,
   };
 
@@ -275,6 +278,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       problems: r.duct ? ductLayout(r.nodes, r.duct).problems : [],
     }));
     state.ducts.triangles = ductLayer.triangles;
+    state.ducts.builds = ductLayer.builds;
+    state.ducts.meshes = ductLayer.meshes;
     syncDuctView();
   }
 

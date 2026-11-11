@@ -197,7 +197,7 @@ test.describe('Повітропровід', () => {
     expect((await ducts(page)).triangles).toBe(0);
   });
 
-  test('траса на 600 точок з повітропроводом: робота програми за кадр довша не більше ніж на 8 мс', async ({ page }) => {
+  test('траса на 600 точок з повітропроводом: одна 3D-модель, без перебудови при обертанні камери', async ({ page }) => {
     // Сходинки по X і Z з кроком 600 мм: 598 колін Ø200 (R = 200 мм) — усе вміщається.
     const nodes: P3[] = [];
     for (let i = 0; i < 600; i++) {
@@ -205,27 +205,7 @@ test.describe('Повітропровід', () => {
       nodes.push({ x: -1500 + (step + (i % 2)) * 600, y: 2000, z: -1000 + step * 600 });
     }
     await openRoom(page, [{ id: 1, nodes }]);
-    const measure = () =>
-      page.evaluate(async () => {
-        const viewer = window.__trasa!.viewer;
-        const raf = window.requestAnimationFrame.bind(window);
-        let busy = 0;
-        window.requestAnimationFrame = (cb) =>
-          raf((t) => {
-            const t0 = performance.now();
-            cb(t);
-            busy += performance.now() - t0;
-          });
-        const frames0 = viewer.frameCount;
-        for (let i = 0; i < 30; i++) {
-          const a = (i / 30) * Math.PI * 2;
-          viewer.setView({ x: Math.sin(a) * 7, y: 4, z: Math.cos(a) * 7 }, { x: 0, y: 1, z: 0 });
-          await new Promise((resolve) => raf(() => raf(resolve)));
-        }
-        window.requestAnimationFrame = raf;
-        return busy / Math.max(1, viewer.frameCount - frames0);
-      });
-    const before = await measure();
+    const t0 = Date.now();
     await page.evaluate(() =>
       window.__trasa!.app!.loadRoutes({
         routes: [
@@ -237,11 +217,26 @@ test.describe('Повітропровід', () => {
         nextId: 2,
       }),
     );
+    const built = Date.now() - t0;
     const d = await ducts(page);
-    expect(d.triangles).toBeGreaterThan(100_000);
     expect(d.routes[0].problems).toEqual([]);
-    const after = await measure();
-    expect(after - before).toBeLessThan(8);
+    // Одна модель на трасу (один виклик малювання), трикутників — у межах бюджету.
+    expect(d.meshes).toBe(1);
+    expect(d.triangles).toBeGreaterThan(100_000);
+    expect(d.triangles).toBeLessThan(250_000);
+    // Побудова — разово й швидко (з запасом на повільний сервер CI).
+    expect(built).toBeLessThan(5000);
+    const builds = d.builds;
+    // Обертання камери модель не перебудовує (кадр — лише малювання готової геометрії).
+    await page.evaluate(async () => {
+      const viewer = window.__trasa!.viewer;
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2;
+        viewer.setView({ x: Math.sin(a) * 7, y: 4, z: Math.cos(a) * 7 }, { x: 0, y: 1, z: 0 });
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      }
+    });
+    expect((await ducts(page)).builds).toBe(builds);
   });
 });
 

@@ -2330,3 +2330,26 @@ body {
     0 1px 4px rgba(0, 0, 0, 0.35);
   will-change: transform;
 }
+
+/* iPad шириною 900–1279 px: шість кнопок із середніми назвами (повні не вміщаються поруч із X/Y/Z). */
+.tool-label-medium {
+  display: none;
+}
+
+@media (min-width: 900px) and (max-width: 1279px) and (min-height: 501px) {
+  .tool-label {
+    display: none;
+  }
+
+  .tool-label-medium {
+    display: inline;
+  }
+
+  .toolbar {
+    gap: 6px;
+  }
+
+  .tool-button {
+    padding: 0 12px;
+  }
+}

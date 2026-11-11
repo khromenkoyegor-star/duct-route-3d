@@ -32,6 +32,10 @@ export interface DuctLayer {
   boxMm(routeId: number): { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null;
   /** Скільки трикутників у всіх повітропроводах (для тестів і перевірки пам'яті). */
   readonly triangles: number;
+  /** Скільки разів будувалась 3D-модель траси (для тестів: не перебудовується без змін). */
+  readonly builds: number;
+  /** Скільки 3D-моделей повітропроводу зараз на сцені (одна на трасу + підсвітки). */
+  readonly meshes: number;
   dispose(): void;
 }
 
@@ -53,6 +57,7 @@ export function createDuctLayer(viewer: Viewer): DuctLayer {
   const entries = new Map<number, Entry>();
   let selected: Mesh | null = null;
   let selectedKey = '';
+  let builds = 0;
 
   const disposeMesh = (mesh: Mesh | null) => {
     if (!mesh) return;
@@ -71,6 +76,7 @@ export function createDuctLayer(viewer: Viewer): DuctLayer {
   const build = (route: Route): Entry | null => {
     if (!route.duct || route.nodes.length < 2) return null;
     const layout = ductLayout(route.nodes, route.duct);
+    builds += 1;
     const mesh = new Mesh(buildDuctGeometry(route.nodes, layout), material);
     mesh.name = `duct-${route.id}`;
     group.add(mesh);
@@ -132,6 +138,12 @@ export function createDuctLayer(viewer: Viewer): DuctLayer {
       const box = geometry.boundingBox ?? new Box3();
       const mm = (v: { x: number; y: number; z: number }) => ({ x: mToMm(v.x), y: mToMm(v.y), z: mToMm(v.z) });
       return { min: mm(box.min), max: mm(box.max) };
+    },
+    get builds() {
+      return builds;
+    },
+    get meshes() {
+      return group.children.length;
     },
     get triangles() {
       let total = 0;

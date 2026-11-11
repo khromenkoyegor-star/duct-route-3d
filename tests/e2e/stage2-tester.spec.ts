@@ -692,7 +692,9 @@ test.describe('Етап 2 (tester): крайові випадки побудов
     const atStart = xs.filter((s) => s.dx === 0);
     expect(atStart.length, 'точка побула рівно на початку').toBeGreaterThan(0);
     const stay = atStart.at(-1)!.t - atStart[0]!.t;
-    expect(stay, 'пауза на початку').toBeGreaterThan(250);
+    // Пауза 0,4 с; кадри в CI (WebKit без відеокарти) рідкі — між першим і останнім кадром на початку
+    // буває лише ~0,2 с, тож поріг з запасом.
+    expect(stay, 'пауза на початку').toBeGreaterThan(150);
     expect(stay).toBeLessThan(900);
     // Ніколи не «перестрибує» з + на − без зупинки рівно на початку.
     const firstNeg = xs.findIndex((s) => s.dx < 0);
