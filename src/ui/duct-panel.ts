@@ -195,11 +195,12 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     if (notify) handlers.onSelect(selection);
   };
 
-  const apply = (r: Route, duct: DuctSpec | null, scope: 'size' | 'transition') => {
+  /** Застосувати зміну; `next` рахується всередині — помилка правил (RangeError) стає поясненням у панелі. */
+  const apply = (r: Route, next: () => DuctSpec | null, scope: 'size' | 'transition') => {
     // Повідомлення прибираємо до зміни: зміна одразу перемальовує панель.
     message = null;
     try {
-      handlers.onDuct(r.id, duct);
+      handlers.onDuct(r.id, next());
     } catch (error) {
       message = { scope, text: error instanceof RangeError ? error.message : 'Не вдалося змінити повітропровід' };
       render();
@@ -208,11 +209,18 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
 
   /** Змінити розмір траси; якщо при цьому зникнуть переходи — спершу спитати. */
   const applySection = (r: Route, section: DuctSection) => {
-    const next = withSection(r.duct ?? null, section);
+    let next: DuctSpec;
+    try {
+      next = withSection(r.duct ?? null, section);
+    } catch (error) {
+      message = { scope: 'size', text: error instanceof RangeError ? error.message : 'Не вдалося змінити розмір' };
+      render();
+      return;
+    }
     const lost = (r.duct?.transitions.length ?? 0) - next.transitions.length;
     if (lost <= 0) {
       shapeChoice = null;
-      apply(r, next, 'size');
+      apply(r, () => next, 'size');
       return;
     }
     const why = r.duct?.section.shape !== section.shape ? 'Перехід між круглим і прямокутним поки не робимо.' : 'Вони стали б переходами на той самий розмір.';
@@ -222,7 +230,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       'Змінити',
       () => {
         shapeChoice = null;
-        apply(r, next, 'size');
+        apply(r, () => next, 'size');
       },
     );
     render();
@@ -358,13 +366,14 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       row.append(
         el('span', 'duct-row-label', `${formatSection(before)} → ${formatSection(existing.to)}`),
         button('panel-button panel-button--danger-text', 'Прибрати перехід', 'duct-transition-remove', () =>
-          apply(r, withoutTransition(spec, segment), 'transition'),
+          apply(r, () => withoutTransition(spec, segment), 'transition'),
         ),
       );
       box.append(row);
       return box;
     }
-    const place = (to: DuctSection) => apply(r, withTransition(spec, segment, to, count), 'transition');
+    // Перехід «на той самий розмір» тощо — пояснення біля полів (RangeError з правил моделі).
+    const place = (to: DuctSection) => apply(r, () => withTransition(spec, segment, to, count), 'transition');
     if (before.shape === 'round') {
       const row = sizeForm('duct-row', () => {
         if (transitionDiameter === null) {
@@ -426,7 +435,9 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
         const item = el('li', 'duct-transition-item');
         item.append(
           el('span', '', `Перехід на відрізку ${t.segment + 1}: ${formatSection(from)} → ${formatSection(t.to)}`),
-          button('icon-button', '✕', `duct-transition-${t.segment}-remove`, () => apply(r, withoutTransition(spec, t.segment), 'transition')),
+          button('icon-button', '✕', `duct-transition-${t.segment}-remove`, () =>
+            apply(r, () => withoutTransition(spec, t.segment), 'transition'),
+          ),
         );
         item.lastElementChild!.setAttribute('aria-label', `Прибрати перехід на відрізку ${t.segment + 1}`);
         list.append(item);

@@ -30,15 +30,15 @@ export const ELBOW_ROUND_SEGMENTS = 4;
  * Радіусне коліно прямокутного повітропроводу: внутрішній радіус, мм (каталоги, напр. Вентека
  * «250×250-90-100»). Припущення до підтвердження Єгором.
  */
-export const RECT_ELBOW_INNER_R_MM = 100;
+export const RECT_ELBOW_INNER_R_MM = 100; // TEMP — з каталогів, чекає підтвердження Єгора
 
 /**
  * Перехід: нахил стінки до осі, градуси. Каталожні довжини концентричних переходів
  * (Ф1000→710 — 545 мм, →800 — 375 мм, →900 — 190 мм) дають L ≈ 1,87·ΔD, тобто 15°.
  */
-export const TRANSITION_SLOPE_DEG = 15;
+export const TRANSITION_SLOPE_DEG = 15; // TEMP — з каталогів, чекає підтвердження Єгора
 /** Найкоротший перехід, мм (припущення до підтвердження Єгором: інакше 150→160 був би 19 мм). */
-export const TRANSITION_MIN_MM = 100;
+export const TRANSITION_MIN_MM = 100; // TEMP — припущення, чекає підтвердження Єгора
 
 export type DuctSection =
   | { readonly shape: 'round'; readonly diameterMm: number }

@@ -85,6 +85,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
   let scan: LoadedScan | null = null;
   /** Чи вже створено всі частини інтерфейсу (до того зміни трас лише записуємо в стан). */
   let ready = false;
+  /** Останній вигляд ліній трас для панелі «Повітропровід» (щоб не перемальовувати без змін). */
+  let ductViewKey = '';
   const state: AppState = {
     status: 'idle',
     scanName: null,
@@ -276,8 +278,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     syncDuctView();
   }
 
-  /** Останній вигляд ліній трас для панелі «Повітропровід» (щоб не перемальовувати без змін). */
-  let ductViewKey = '';
   /**
    * Лінії трас поруч із повітропроводом: у режимі «Повітропровід» не малюємо лінію трас, що вже мають трубу
    * (номери лишаються; траса без труби — лінією); у панелі — решта трас приглушені, на вибраному
