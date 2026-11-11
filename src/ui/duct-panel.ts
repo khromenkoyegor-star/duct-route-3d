@@ -33,6 +33,8 @@ export interface DuctSelection {
 
 export interface DuctPanelHandlers {
   onDuct(routeId: number, duct: DuctSpec | null): void;
+  /** Підтвердження системним віконцем (наприклад, «переходи буде прибрано»); onOk — якщо погодились. */
+  confirm(title: string, text: string, okLabel: string, onOk: () => void): void;
   onSelect(selection: DuctSelection | null): void;
   onMode(mode: ViewMode): void;
   onTransparency(transparency: number): void;
@@ -84,22 +86,40 @@ function segmented(options: Array<[string, string, string]>, value: string, onPi
   return box;
 }
 
-/** Числове поле в мм (на iPhone — цифрова клавіатура). */
-function mmInput(testid: string, label: string, value: string, onInput: (v: string) => void): HTMLElement {
+/** Числове поле в мм (на iPhone — цифрова клавіатура; «Готово» на клавіатурі — застосувати). */
+function mmInput(testid: string, label: string, value: string, invalid: boolean, onInput: (v: string) => void): HTMLElement {
   const wrap = el('label', 'mm-field');
-  wrap.append(el('span', 'mm-field-label', label));
+  wrap.append(el('span', 'mm-field-label', `${label}, мм`));
   const input = el('input', 'mm-input');
   input.type = 'text';
   input.inputMode = 'numeric';
   input.pattern = '[0-9]*';
   input.autocomplete = 'off';
+  input.enterKeyHint = 'done';
   input.value = value;
   input.dataset.testid = testid;
+  input.classList.toggle('mm-input--invalid', invalid);
+  input.setAttribute('aria-invalid', String(invalid));
   input.setAttribute('aria-label', `${label}, мм`);
   input.addEventListener('input', () => onInput(input.value));
-  wrap.append(input, el('span', 'mm-field-unit', 'мм'));
+  wrap.append(input);
   return wrap;
 }
+
+/** Ш × В у формі: Enter (клавіатура iPad) чи «Готово» (iPhone) натискає кнопку. */
+function sizeForm(className: string, onSubmit: () => void, ...children: HTMLElement[]): HTMLFormElement {
+  const form = el('form', className);
+  form.noValidate = true;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    onSubmit();
+  });
+  form.append(...children);
+  return form;
+}
+
+/** «400 мм» з нерозривним пробілом — число й «мм» не розриваються переносом. */
+const mm = (value: number) => formatMm(value).replace(' мм', '\u00a0мм');
 
 /** Вибір діаметра зі списку Єгора (системний список iOS). */
 function diameterSelect(testid: string, current: number | null, exclude: number | null, onPick: (d: number) => void): HTMLSelectElement {
@@ -142,43 +162,86 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
   let mode: ViewMode = 'both';
   let transparency = 0;
   let selection: DuctSelection | null = null;
-  /** Форма, яку вибрали кнопкою (поки розмір не задано) — для вибраної траси. */
+  /** Форма, яку вибрали кнопкою (поки розмір не задано чи ще не змінено) — для вибраної траси. */
   let shapeChoice: 'round' | 'rect' | null = null;
   /** Чернетки полів (щоб перемальовування не стирало введене). */
   let rectDraft = { w: '', h: '' };
   let transitionDraft = { w: '', h: '' };
-  let message = '';
+  /** Діаметр після переходу, вибраний у списку (до «Перехід тут»). */
+  let transitionDiameter: number | null = null;
+  /** Пояснення біля того місця, де помилка: розмір траси чи перехід. */
+  let message: { scope: 'size' | 'transition'; text: string; fields?: Array<'w' | 'h'> } | null = null;
+  /** Після перемальовування прокрутити до редактора переходу (на iPhone він нижче видимої частини). */
+  let scrollToEditor = false;
 
   const route = () => (selection ? routes.find((r) => r.id === selection!.routeId) ?? null : null);
 
   const choose = (next: DuctSelection | null, notify = true) => {
     const changedRoute = next?.routeId !== selection?.routeId;
+    const changedSegment = changedRoute || next?.segment !== selection?.segment;
     selection = next;
     if (changedRoute) {
       shapeChoice = null;
       rectDraft = { w: '', h: '' };
     }
-    if (changedRoute || next?.segment !== null) transitionDraft = { w: '', h: '' };
-    message = '';
+    if (changedSegment) {
+      transitionDraft = { w: '', h: '' };
+      transitionDiameter = null;
+      scrollToEditor = next?.segment !== null && next?.segment !== undefined;
+    }
+    message = null;
     // Спершу панель з новим вмістом (її розмір потрібен, щоб показати трасу у вільній частині екрана).
     render();
     if (notify) handlers.onSelect(selection);
   };
 
-  const apply = (r: Route, duct: DuctSpec | null) => {
+  const apply = (r: Route, duct: DuctSpec | null, scope: 'size' | 'transition') => {
+    // Повідомлення прибираємо до зміни: зміна одразу перемальовує панель.
+    message = null;
     try {
       handlers.onDuct(r.id, duct);
-      message = '';
     } catch (error) {
-      message = error instanceof RangeError ? error.message : 'Не вдалося змінити повітропровід';
+      message = { scope, text: error instanceof RangeError ? error.message : 'Не вдалося змінити повітропровід' };
       render();
     }
   };
+
+  /** Змінити розмір траси; якщо при цьому зникнуть переходи — спершу спитати. */
+  const applySection = (r: Route, section: DuctSection) => {
+    const next = withSection(r.duct ?? null, section);
+    const lost = (r.duct?.transitions.length ?? 0) - next.transitions.length;
+    if (lost <= 0) {
+      shapeChoice = null;
+      apply(r, next, 'size');
+      return;
+    }
+    const why = r.duct?.section.shape !== section.shape ? 'Перехід між круглим і прямокутним поки не робимо.' : 'Вони стали б переходами на той самий розмір.';
+    handlers.confirm(
+      lost === 1 ? 'Перехід буде прибрано' : `Переходи (${lost}) буде прибрано`,
+      `${why} Змінити розмір траси?`,
+      'Змінити',
+      () => {
+        shapeChoice = null;
+        apply(r, next, 'size');
+      },
+    );
+    render();
+  };
+
+  const messageEl = (scope: 'size' | 'transition') => {
+    if (message?.scope !== scope) return null;
+    const warn = el('p', 'ruler-sub ruler-sub--warning duct-message', message.text);
+    warn.dataset.testid = 'duct-message';
+    warn.setAttribute('role', 'alert');
+    return warn;
+  };
+  const invalid = (scope: 'size' | 'transition', field: 'w' | 'h') => message?.scope === scope && !!message.fields?.includes(field);
 
   function sizeControls(r: Route): HTMLElement {
     const box = el('div', 'duct-size');
     const current = r.duct?.section ?? null;
     const shape = shapeChoice ?? current?.shape ?? 'round';
+    const hasTransitions = (r.duct?.transitions.length ?? 0) > 0;
     box.append(
       segmented(
         [
@@ -188,46 +251,60 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
         shape,
         (v) => {
           shapeChoice = v as 'round' | 'rect';
-          message = '';
+          message = null;
           render();
         },
       ),
     );
+    // Вибрали іншу форму, ніж зараз у траси, — підказати, що зміниться лише після вибору розміру.
+    if (current && shape !== current.shape) {
+      box.append(el('p', 'ruler-sub duct-hint', `Зараз ${formatSection(current)} — задайте розмір, щоб змінити`));
+    }
     if (shape === 'round') {
       const d = current?.shape === 'round' ? current.diameterMm : null;
       const row = el('div', 'duct-row');
       row.append(
-        el('span', 'duct-row-label', 'Діаметр'),
-        diameterSelect('duct-diameter', d, null, (value) => {
-          shapeChoice = null;
-          apply(r, withSection(r.duct ?? null, { shape: 'round', diameterMm: value }));
-        }),
+        el('span', 'duct-row-label', hasTransitions ? 'Діаметр на початку' : 'Діаметр'),
+        diameterSelect('duct-diameter', d, null, (value) => applySection(r, { shape: 'round', diameterMm: value })),
       );
       box.append(row);
     } else {
       if (current?.shape === 'rect' && rectDraft.w === '' && rectDraft.h === '') {
         rectDraft = { w: String(current.widthMm), h: String(current.heightMm) };
       }
-      const row = el('div', 'duct-row duct-row--rect');
-      row.append(
-        mmInput('duct-width', 'Ширина', rectDraft.w, (v) => (rectDraft.w = v)),
-        el('span', 'duct-times', '×'),
-        mmInput('duct-height', 'Висота', rectDraft.h, (v) => (rectDraft.h = v)),
-        button('panel-button panel-button--primary duct-apply', 'Задати', 'duct-apply-rect', () => {
-          const w = parseSide(rectDraft.w);
-          const h = parseSide(rectDraft.h);
-          if (!sideOk(w) || !sideOk(h)) {
-            message = SIDE_HINT;
-            render();
-            return;
-          }
-          shapeChoice = null;
-          apply(r, withSection(r.duct ?? null, { shape: 'rect', widthMm: w, heightMm: h }));
-        }),
+      const submit = () => {
+        const w = parseSide(rectDraft.w);
+        const h = parseSide(rectDraft.h);
+        const fields = [...(sideOk(w) ? [] : (['w'] as const)), ...(sideOk(h) ? [] : (['h'] as const))];
+        if (fields.length > 0) {
+          message = { scope: 'size', text: SIDE_HINT, fields };
+          render();
+          return;
+        }
+        applySection(r, { shape: 'rect', widthMm: w, heightMm: h });
+      };
+      if (hasTransitions) box.append(el('p', 'duct-section-title', 'Розмір на початку'));
+      box.append(
+        sizeForm(
+          'duct-row duct-row--rect',
+          submit,
+          mmInput('duct-width', 'Ширина', rectDraft.w, invalid('size', 'w'), (v) => (rectDraft.w = v)),
+          el('span', 'duct-times', '×'),
+          mmInput('duct-height', 'Висота', rectDraft.h, invalid('size', 'h'), (v) => (rectDraft.h = v)),
+          submitButton('Задати', 'duct-apply-rect'),
+        ),
       );
-      box.append(row);
     }
+    const warn = messageEl('size');
+    if (warn) box.append(warn);
     return box;
+  }
+
+  function submitButton(text: string, testid: string): HTMLButtonElement {
+    const b = el('button', 'panel-button panel-button--primary duct-apply', text);
+    b.type = 'submit';
+    b.dataset.testid = testid;
+    return b;
   }
 
   function segmentList(r: Route, spec: DuctSpec): HTMLElement {
@@ -250,14 +327,18 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       );
       const on = selection?.segment === i;
       row.setAttribute('aria-pressed', String(on));
-      row.classList.toggle('route-row--selected', on);
-      row.classList.toggle('duct-segment--problem', problemOf.has(i));
-      const dirText = dir ? `${dir.axis} ${dir.sign > 0 ? '+' : '−'}${formatMm(len)}` : formatMm(len);
+      row.classList.toggle('duct-segment--selected', on);
+      const problem = problemOf.get(i);
+      row.classList.toggle('duct-segment--problem', !!problem);
+      const dirText = dir ? `${dir.axis} ${dir.sign > 0 ? '+' : '−'}${mm(len)}` : mm(len);
       row.append(el('span', 'route-row-name', `${i + 1} · ${dirText}`));
       const t = transitionOn.get(i);
-      const meta = t ? `перехід ${formatSection(i === 0 ? spec.section : sections[i - 1]!)} → ${formatSection(t.to)}` : formatSection(sections[i]!);
+      let meta = t ? `перехід ${formatSection(i === 0 ? spec.section : sections[i - 1]!)} → ${formatSection(t.to)}` : formatSection(sections[i]!);
+      if (problem) meta = `замало: треба ${mm(problem.needMm)}, є ${mm(problem.haveMm)}`;
       row.append(el('span', 'route-row-meta', meta));
       item.append(row);
+      // Редактор переходу — одразу під вибраним рядком.
+      if (on) item.append(transitionEditor(r, spec, i));
       list.append(item);
     }
     box.append(list);
@@ -270,54 +351,65 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     const before = segment === 0 ? spec.section : sections[segment - 1]!;
     const existing = spec.transitions.find((t) => t.segment === segment);
     const box = el('div', 'duct-transition');
-    box.append(el('p', 'duct-section-title', `Відрізок ${segment + 1}: перехід на його початку`));
+    box.dataset.testid = 'duct-transition-editor';
+    box.append(el('p', 'duct-section-title', `Перехід на початку відрізка ${segment + 1}`));
     if (existing) {
       const row = el('div', 'duct-row');
       row.append(
         el('span', 'duct-row-label', `${formatSection(before)} → ${formatSection(existing.to)}`),
         button('panel-button panel-button--danger-text', 'Прибрати перехід', 'duct-transition-remove', () =>
-          apply(r, withoutTransition(spec, segment)),
+          apply(r, withoutTransition(spec, segment), 'transition'),
         ),
       );
       box.append(row);
       return box;
     }
-    const place = (to: DuctSection) => apply(r, withTransition(spec, segment, to, count));
-    const row = el('div', 'duct-row');
+    const place = (to: DuctSection) => apply(r, withTransition(spec, segment, to, count), 'transition');
     if (before.shape === 'round') {
-      let picked: number | null = null;
+      const row = sizeForm('duct-row', () => {
+        if (transitionDiameter === null) {
+          message = { scope: 'transition', text: 'Виберіть діаметр після переходу' };
+          render();
+          return;
+        }
+        place({ shape: 'round', diameterMm: transitionDiameter });
+      });
       row.append(
         el('span', 'duct-row-label', `${formatSection(before)} →`),
-        diameterSelect('duct-transition-diameter', null, before.diameterMm, (d) => (picked = d)),
-        button('panel-button panel-button--primary duct-apply', 'Перехід тут', 'duct-transition-here', () => {
-          if (picked === null) {
-            message = 'Виберіть діаметр після переходу';
-            render();
-            return;
-          }
-          place({ shape: 'round', diameterMm: picked });
-        }),
+        diameterSelect('duct-transition-diameter', transitionDiameter, before.diameterMm, (d) => (transitionDiameter = d)),
+        submitButton('Перехід тут', 'duct-transition-here'),
       );
+      box.append(row);
     } else {
-      row.classList.add('duct-row--rect');
-      row.append(
-        mmInput('duct-transition-width', 'Ширина', transitionDraft.w, (v) => (transitionDraft.w = v)),
-        el('span', 'duct-times', '×'),
-        mmInput('duct-transition-height', 'Висота', transitionDraft.h, (v) => (transitionDraft.h = v)),
-        button('panel-button panel-button--primary duct-apply', 'Перехід тут', 'duct-transition-here', () => {
-          const w = parseSide(transitionDraft.w);
-          const h = parseSide(transitionDraft.h);
-          const to: DuctSection = { shape: 'rect', widthMm: w, heightMm: h };
-          if (!sideOk(w) || !sideOk(h) || !isValidSection(to)) {
-            message = SIDE_HINT;
-            render();
-            return;
-          }
-          place(to);
-        }),
+      // Поточний розмір у полях — щоб змінити лише одне число.
+      if (transitionDraft.w === '' && transitionDraft.h === '') {
+        transitionDraft = { w: String(before.widthMm), h: String(before.heightMm) };
+      }
+      const submit = () => {
+        const w = parseSide(transitionDraft.w);
+        const h = parseSide(transitionDraft.h);
+        const fields = [...(sideOk(w) ? [] : (['w'] as const)), ...(sideOk(h) ? [] : (['h'] as const))];
+        const to: DuctSection = { shape: 'rect', widthMm: w, heightMm: h };
+        if (fields.length > 0 || !isValidSection(to)) {
+          message = { scope: 'transition', text: SIDE_HINT, fields };
+          render();
+          return;
+        }
+        place(to);
+      };
+      box.append(
+        sizeForm(
+          'duct-row duct-row--rect',
+          submit,
+          mmInput('duct-transition-width', 'Ширина', transitionDraft.w, invalid('transition', 'w'), (v) => (transitionDraft.w = v)),
+          el('span', 'duct-times', '×'),
+          mmInput('duct-transition-height', 'Висота', transitionDraft.h, invalid('transition', 'h'), (v) => (transitionDraft.h = v)),
+          submitButton('Перехід тут', 'duct-transition-here'),
+        ),
       );
     }
-    box.append(row);
+    const warn = messageEl('transition');
+    if (warn) box.append(warn);
     return box;
   }
 
@@ -326,6 +418,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     const count = r.nodes.length - 1;
     const sections = sectionsBySegment(spec, count);
     if (spec.transitions.length > 0) {
+      out.push(el('p', 'duct-section-title', 'Переходи'));
       const list = el('ul', 'duct-transitions');
       list.dataset.testid = 'duct-transitions';
       for (const t of spec.transitions) {
@@ -333,7 +426,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
         const item = el('li', 'duct-transition-item');
         item.append(
           el('span', '', `Перехід на відрізку ${t.segment + 1}: ${formatSection(from)} → ${formatSection(t.to)}`),
-          button('icon-button', '✕', `duct-transition-${t.segment}-remove`, () => apply(r, withoutTransition(spec, t.segment))),
+          button('icon-button', '✕', `duct-transition-${t.segment}-remove`, () => apply(r, withoutTransition(spec, t.segment), 'transition')),
         );
         item.lastElementChild!.setAttribute('aria-label', `Прибрати перехід на відрізку ${t.segment + 1}`);
         list.append(item);
@@ -350,7 +443,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
           el(
             'p',
             '',
-            `Відрізок ${p.segment + 1} закороткий для колін і переходу: потрібно щонайменше ${formatMm(p.needMm)}, є ${formatMm(p.haveMm)}`,
+            `Відрізок ${p.segment + 1} закороткий для колін і переходу: потрібно щонайменше ${mm(p.needMm)}, є ${mm(p.haveMm)}`,
           ),
         );
       }
@@ -361,6 +454,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
 
   function render(): void {
     if (element.hidden) return;
+    const scrollTop = element.scrollTop;
     const children: HTMLElement[] = [];
     const head = el('div', 'ruler-head');
     const title = el('p', 'ruler-title', 'Повітропровід');
@@ -368,14 +462,20 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     head.append(title, button('ruler-done', 'Закрити', 'duct-close', () => handlers.onClose()));
     children.push(head);
 
-    // Траси.
+    // Траси: розмір або «без труби»; «!» — є закороткі відрізки.
     const chips = el('div', 'duct-routes');
     for (const r of routes) {
       const chip = button('duct-chip', `Траса ${r.id}`, `duct-route-${r.id}`, () => choose({ routeId: r.id, segment: null }));
       const on = selection?.routeId === r.id;
       chip.setAttribute('aria-pressed', String(on));
       chip.classList.toggle('duct-chip--on', on);
-      chip.append(el('span', 'duct-chip-size', r.duct ? formatSection(r.duct.section) : '—'));
+      const problems = r.duct ? ductLayout(r.nodes, r.duct).problems.length : 0;
+      chip.append(el('span', 'duct-chip-size', r.duct ? formatSection(r.duct.section) : 'без труби'));
+      if (problems > 0) {
+        const badge = el('span', 'duct-chip-badge', '!');
+        badge.setAttribute('aria-label', 'є закороткі відрізки');
+        chip.append(badge);
+      }
       chips.append(chip);
     }
     children.push(chips);
@@ -387,17 +487,10 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       children.push(sizeControls(r));
       if (r.duct) {
         children.push(segmentList(r, r.duct));
-        if (selection?.segment !== null && selection?.segment !== undefined) children.push(transitionEditor(r, r.duct, selection.segment));
         children.push(...transitionsAndProblems(r, r.duct));
       } else {
         children.push(el('p', 'ruler-sub', 'Задайте розмір — уся траса стане цього розміру'));
       }
-    }
-    if (message) {
-      const warn = el('p', 'ruler-sub ruler-sub--warning', message);
-      warn.dataset.testid = 'duct-message';
-      warn.setAttribute('role', 'alert');
-      children.push(warn);
     }
 
     // Показ і прозорість.
@@ -416,7 +509,10 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     );
     const opacity = el('label', 'duct-opacity');
     const percent = Math.round(transparency * 100);
-    opacity.append(el('span', 'duct-section-title', `Прозорість скану: ${percent} %`));
+    const value = el('span', 'duct-opacity-value', `${percent} %`);
+    const caption = el('span', 'duct-opacity-caption', 'Прозорість скану ');
+    caption.append(value);
+    opacity.append(caption);
     const range = el('input', 'duct-range');
     range.type = 'range';
     range.min = '0';
@@ -426,7 +522,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     range.dataset.testid = 'scan-opacity';
     range.addEventListener('input', () => {
       transparency = Number(range.value) / 100;
-      opacity.firstElementChild!.textContent = `Прозорість скану: ${range.value} %`;
+      value.textContent = `${range.value} %`;
       handlers.onTransparency(transparency);
     });
     opacity.append(range);
@@ -434,6 +530,11 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     children.push(view);
 
     element.replaceChildren(...children);
+    element.scrollTop = scrollTop;
+    if (scrollToEditor) {
+      scrollToEditor = false;
+      element.querySelector('[data-testid="duct-transition-editor"]')?.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   return {
@@ -464,7 +565,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       element.hidden = true;
       selection = null;
       shapeChoice = null;
-      message = '';
+      message = null;
     },
     select(next) {
       choose(next);

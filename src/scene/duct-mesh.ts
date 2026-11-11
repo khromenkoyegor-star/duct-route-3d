@@ -278,13 +278,14 @@ export function buildDuctGeometry(nodes: readonly PointMm[], layout: DuctLayout,
 export function createGalvanizedMaterial(): MeshStandardMaterial {
   return new MeshStandardMaterial({
     color: new Color(0xc9ced3),
-    metalness: 0.85,
-    roughness: 0.38,
+    metalness: 0.8,
+    // Трохи матовіше: у світлій темі верх труби не «вигорає» до білого.
+    roughness: 0.45,
     side: DoubleSide,
   });
 }
 
 /** Підсвітка поверх труби (вибраний відрізок, закороткий відрізок). */
-export function createHighlightMaterial(color: number): Material {
-  return new MeshBasicMaterial({ color, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide });
+export function createHighlightMaterial(color: number, opacity = 0.45): Material {
+  return new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: DoubleSide });
 }

@@ -84,12 +84,27 @@ test.describe('Повітропровід', () => {
     expect((await ducts(page)).routes[0].sections).toEqual(['Ø200', 'Ø200', 'Ø200']);
     await page.getByTestId('duct-segment-1').click();
     expect((await ducts(page)).selection).toEqual({ routeId: 1, segment: 1 });
+    // Редактор переходу — одразу під вибраним рядком, рядок — синій; кільце там, де стане перехід.
+    await expect(page.getByTestId('duct-segment-1')).toHaveClass(/duct-segment--selected/);
+    await expect(page.getByTestId('route-marker')).toBeVisible();
+    // Без діаметра — пояснення; після успіху воно зникає.
+    await page.getByTestId('duct-transition-here').click();
+    await expect(page.getByTestId('duct-message')).toContainText('Виберіть діаметр');
     await page.getByTestId('duct-transition-diameter').selectOption('315');
     await page.getByTestId('duct-transition-here').click();
+    await expect(page.getByTestId('duct-message')).toHaveCount(0);
     let d = await ducts(page);
     expect(d.routes[0].sections).toEqual(['Ø200', 'Ø315', 'Ø315']);
     expect(d.routes[0].duct.transitions).toEqual([{ segment: 1, to: { shape: 'round', diameterMm: 315 } }]);
     await expect(page.getByTestId('duct-transitions')).toContainText('Перехід на відрізку 2: Ø200 → Ø315');
+    // Зміна форми прибрала б перехід — спершу питання; «Скасувати» нічого не змінює.
+    await page.getByTestId('duct-shape-rect').click();
+    await page.getByTestId('duct-width').fill('400');
+    await page.getByTestId('duct-height').fill('250');
+    await page.getByTestId('duct-apply-rect').click();
+    await expect(page.getByTestId('choice')).toBeVisible();
+    await page.getByTestId('choice-cancel').click();
+    expect((await ducts(page)).routes[0].sections).toEqual(['Ø200', 'Ø315', 'Ø315']);
     await page.getByTestId('duct-transition-1-remove').click();
     d = await ducts(page);
     expect(d.routes[0].sections).toEqual(['Ø200', 'Ø200', 'Ø200']);
@@ -103,9 +118,13 @@ test.describe('Повітропровід', () => {
     await page.getByTestId('duct-height').fill('300');
     await page.getByTestId('duct-apply-rect').click();
     await expect(page.getByTestId('duct-message')).toContainText('від 50 до 3000 мм');
+    await expect(page.getByTestId('duct-width')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByTestId('duct-height')).toHaveAttribute('aria-invalid', 'false');
     expect((await ducts(page)).routes[0].duct).toBeNull();
     await page.getByTestId('duct-width').fill('500');
-    await page.getByTestId('duct-apply-rect').click();
+    // Enter у полі — те саме, що «Задати».
+    await page.getByTestId('duct-width').press('Enter');
+    await expect(page.getByTestId('duct-message')).toHaveCount(0);
     const d = await ducts(page);
     expect(d.routes[0].duct.section).toEqual({ shape: 'rect', widthMm: 500, heightMm: 300 });
     expect(d.routes[0].sections).toEqual(['500×300', '500×300', '500×300']);
@@ -144,6 +163,10 @@ test.describe('Повітропровід', () => {
     await page.mouse.click(Math.round(p.x), Math.round(p.y));
     expect((await ducts(page)).selection).toEqual({ routeId: 1, segment: 1 });
     await expect(page.getByTestId('duct-segment-1')).toHaveAttribute('aria-pressed', 'true');
+    // Промах повз трубу вибору не знімає.
+    const away = await page.evaluate(() => window.__trasa!.viewer.projectPoint({ x: -1.8, y: 0.05, z: 1.2 }));
+    await page.mouse.click(Math.round(away.x), Math.round(away.y));
+    expect((await ducts(page)).selection).toEqual({ routeId: 1, segment: 1 });
   });
 
   test('показ «Траса / Повітропровід / Обидва» і прозорість скану', async ({ page }) => {
@@ -152,9 +175,11 @@ test.describe('Повітропровід', () => {
     await setDiameter(page, 200);
     await page.getByTestId('view-mode-duct').click();
     expect((await ducts(page)).mode).toBe('duct');
-    await expect(page.getByTestId('route-layer')).toBeHidden();
+    // Лінію траси з трубою не малюємо, номер траси лишається.
+    await expect(page.locator('[data-testid="route-layer"] g.route--no-line')).toHaveCount(1);
+    await expect(page.locator('.route-tag')).toHaveText(['1']);
     await page.getByTestId('view-mode-route').click();
-    await expect(page.getByTestId('route-layer')).toBeVisible();
+    await expect(page.locator('[data-testid="route-layer"] g.route--no-line')).toHaveCount(0);
     await page.getByTestId('view-mode-both').click();
     await page.getByTestId('scan-opacity').fill('60');
     expect((await ducts(page)).transparency).toBeCloseTo(0.6, 6);

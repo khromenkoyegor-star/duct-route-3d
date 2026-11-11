@@ -9,7 +9,7 @@
  *
  * Чиста логіка: усе в мм, без Three.js і без DOM. 3D будується з цих даних (scene/duct-mesh.ts).
  */
-import { type P3, type PointMm, type RouteSet, segmentDirection } from './route';
+import { NODE_TOLERANCE_MM, type P3, type PointMm, type RouteSet, segmentDirection } from './route';
 
 /** Діаметри круглих повітропроводів, мм — список Єгора (09.11.2026). */
 export const DUCT_DIAMETERS_MM: readonly number[] = [100, 125, 150, 160, 200, 250, 315, 355, 400, 450];
@@ -270,6 +270,11 @@ export function segmentFrames(dirs: readonly P3[]): Frame[] {
   for (let i = 1; i < dirs.length; i++) {
     const a = dirs[i - 1]!;
     const b = dirs[i]!;
+    // Вузол без повороту (траса йде далі прямо) — переріз не повертається.
+    if (dot(a, b) > 0.5) {
+      frames.push(frame);
+      continue;
+    }
     const n = cross(a, b);
     const turn = (w: P3) => clean(sub(scale(n, dot(w, n)), scale(a, dot(w, b))));
     frame = { u: turn(frame.u), v: turn(frame.v) };
@@ -299,7 +304,8 @@ export function ductLayout(nodes: readonly PointMm[], spec: DuctSpec): DuctLayou
   for (let i = 0; i < count; i++) {
     const a = nodes[i]!;
     const b = nodes[i + 1]!;
-    const d = segmentDirection(a, b);
+    // Той самий допуск, що й у перевірці траси (вузли можуть відхилятися до 0,1 мм).
+    const d = segmentDirection(a, b, NODE_TOLERANCE_MM);
     if (!d) throw new RangeError('Траса має йти вздовж осей (див. route.ts)');
     dirs.push(scale(AXIS_UNIT[d.axis], d.sign));
     lengths.push(length(sub(b, a)));
@@ -315,11 +321,13 @@ export function ductLayout(nodes: readonly PointMm[], spec: DuctSpec): DuctLayou
   }));
 
   // Коліно у вузлі k (1…count−1) — розміру відрізка k−1: перехід, якщо є, стоїть уже після коліна.
+  // У вузлі без повороту (траса йде далі прямо) коліна немає — труба суцільна.
   const elbows: DuctElbow[] = [];
   const elbowAt: number[] = new Array(count + 1).fill(0);
   for (let k = 1; k < count; k++) {
     const dirIn = dirs[k - 1]!;
     const dirOut = dirs[k]!;
+    if (dot(dirIn, dirOut) > 0.5) continue;
     const section = sections[k - 1]!;
     const frameIn = frames[k - 1]!;
     const radiusMm = elbowRadiusMm(section, frameIn, dirOut);
@@ -458,13 +466,14 @@ export function raySegmentDistance(o: P3, d: P3, a: P3, b: P3): { distance: numb
 
 /**
  * Вибір відрізка повітропроводу дотиком: промінь (мм) → найближчий по променю відрізок, до осі якого
- * промінь проходить не далі за половину перерізу (+ запас на палець, мм). Траси без повітропроводу — пропускаються.
+ * промінь проходить не далі за половину перерізу + запас на палець. Запас — число (мм) або функція від
+ * відстані по променю (мм) — щоб рахувати його в пікселях екрана. Траси без повітропроводу — пропускаються.
  */
 export function pickDuctSegment(
   origin: P3,
   direction: P3,
   routes: readonly { id: number; nodes: readonly PointMm[]; duct?: DuctSpec | null }[],
-  slackMm = 30,
+  slackMm: number | ((distanceMm: number) => number) = 30,
 ): { routeId: number; segment: number } | null {
   let best: { routeId: number; segment: number; t: number } | null = null;
   for (const route of routes) {
@@ -472,7 +481,8 @@ export function pickDuctSegment(
     const sections = sectionsBySegment(route.duct, route.nodes.length - 1);
     for (let i = 0; i + 1 < route.nodes.length; i++) {
       const hit = raySegmentDistance(origin, direction, route.nodes[i]!, route.nodes[i + 1]!);
-      if (hit.distance > sectionSpanMm(sections[i]!) / 2 + slackMm) continue;
+      const slack = typeof slackMm === 'function' ? slackMm(hit.t) : slackMm;
+      if (hit.distance > sectionSpanMm(sections[i]!) / 2 + slack) continue;
       if (!best || hit.t < best.t) best = { routeId: route.id, segment: i, t: hit.t };
     }
   }

@@ -16,7 +16,8 @@ import {
 } from '../scene/scan-loader';
 import type { Viewer } from '../scene/viewer';
 import { type DuctProblem, type DuctSpec, ductLayout, formatSection, pickDuctSegment, sectionsBySegment } from '../core/duct';
-import { formatPointCount, type RouteSet, toMm } from '../core/route';
+import { formatPointCount, type RouteSet, toM, toMm } from '../core/route';
+import { mmToM, mToMm } from '../core/units';
 import { createDuctLayer } from '../scene/duct-layer';
 import { createAlert, createChoice, createProgress } from './dialogs';
 import { createDuctPanel, type DuctSelection, type ViewMode } from './duct-panel';
@@ -174,18 +175,32 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       viewer.setScanTransparency(transparency);
     },
     onClose: () => requestTool('none'),
+    confirm: (title, text, okLabel, onOk) =>
+      choice.show(title, text, [
+        { label: 'Скасувати', role: 'cancel', testid: 'choice-cancel' },
+        { label: okLabel, role: 'destructive', testid: 'choice-ok', onSelect: onOk },
+      ]),
   });
+  /** Ціль для пальця навколо осі труби: щонайменше 22 px екрана в кожен бік (44 px разом). */
+  const TAP_TARGET_HALF_PX = 22;
   // Дотик по трубі на сцені вибирає відрізок (для переходу), поки відкрита панель «Повітропровід».
   onTap(viewer.canvas, {
     onTap: (x, y) => {
       if (state.tool !== 'duct') return;
       const ray = viewer.screenRay(x, y);
       if (!ray) return;
+      // Запас на палець — у пікселях екрана на тій відстані, де труба (мм ↔ м лише через units.ts).
+      const slack = (distanceMm: number) => mToMm(viewer.metresPerPixelAt(mmToM(distanceMm))) * TAP_TARGET_HALF_PX;
       // Початок променя — точка (м → мм); напрямок — одиничний, без одиниць.
-      const hit = pickDuctSegment(toMm(ray.origin), ray.direction, state.routes.set.routes);
-      const current = ductPanel.selection;
-      ductPanel.select(hit ?? (current ? { routeId: current.routeId, segment: null } : null));
+      const hit = pickDuctSegment(toMm(ray.origin), ray.direction, state.routes.set.routes, slack);
+      // Промах повз трубу вибору не знімає (знімається повторним дотиком у списку).
+      if (hit) ductPanel.select(hit);
     },
+  });
+  /** Камера до відкриття панелі (вона могла показати трасу); повертаємо, якщо людина камеру не крутила. */
+  let viewBeforePanel: ReturnType<Viewer['snapshotView']> | null = null;
+  viewer.onUserCamera(() => {
+    viewBeforePanel = null;
   });
 
   const routeDelete = createRouteDelete({
@@ -258,17 +273,46 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       problems: r.duct ? ductLayout(r.nodes, r.duct).problems : [],
     }));
     state.ducts.triangles = ductLayer.triangles;
+    syncDuctView();
   }
 
-  /** «Траса / Повітропровід / Обидва»: лінії трас ховаються лише поза побудовою траси. */
+  /** Останній вигляд ліній трас для панелі «Повітропровід» (щоб не перемальовувати без змін). */
+  let ductViewKey = '';
+  /**
+   * Лінії трас поруч із повітропроводом: у режимі «Повітропровід» не малюємо лінію трас, що вже мають трубу
+   * (номери лишаються; траса без труби — лінією); у панелі — решта трас приглушені, на вибраному
+   * відрізку — кільце там, де стане перехід.
+   */
+  function syncDuctView(): void {
+    const routes = state.routes.set.routes;
+    const linesHidden = new Set(state.ducts.mode === 'duct' ? routes.filter((r) => r.duct).map((r) => r.id) : []);
+    const selection = ductPanel.open ? ductPanel.selection : null;
+    const focus = selection?.routeId ?? null;
+    let marker: ReturnType<typeof toM> | null = null;
+    const selected = selection && selection.segment !== null ? routes.find((r) => r.id === selection.routeId) : undefined;
+    if (selected?.duct && selection && selection.segment !== null) {
+      const seg = selection.segment;
+      // Перехід стає на початку відрізка — одразу після коліна (або на самому початку траси).
+      const elbow = ductLayout(selected.nodes, selected.duct).elbows.find((e) => e.node === seg);
+      marker = toM(elbow ? elbow.end : selected.nodes[seg]!);
+    }
+    const key = JSON.stringify([focus, [...linesHidden], marker]);
+    if (key === ductViewKey) return;
+    ductViewKey = key;
+    route.setDuctView({ focus, linesHidden, marker });
+  }
+
+  /** «Траса / Повітропровід / Обидва». */
   function applyViewMode(): void {
-    const mode = state.ducts.mode;
-    route.layer.hidden = mode === 'duct' && state.tool !== 'route';
-    ductLayer.setVisible(mode !== 'route');
+    ductLayer.setVisible(state.ducts.mode !== 'route');
+    syncDuctView();
   }
 
   /** Увімкнути інструмент (решта вимикаються). */
   function applyTool(next: ToolName): void {
+    const panelBefore = state.tool === 'duct' || state.tool === 'delete';
+    const panelAfter = next === 'duct' || next === 'delete';
+    if (!panelBefore && panelAfter) viewBeforePanel = viewer.snapshotView();
     state.tool = next;
     ruler.setActive(next === 'ruler');
     route.setActive(next === 'route');
@@ -287,6 +331,9 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     root.classList.toggle('is-route', next === 'route');
     root.classList.toggle('is-route-delete', next === 'delete');
     root.classList.toggle('is-duct', next === 'duct');
+    // Закрили список трас чи панель «Повітропровід» — камера повертається туди, де була.
+    if (panelBefore && !panelAfter && viewBeforePanel) viewer.restoreView(viewBeforePanel);
+    if (!panelAfter) viewBeforePanel = null;
   }
 
   /**

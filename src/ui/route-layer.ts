@@ -28,6 +28,12 @@ export interface RouteLayerData {
   highlight: number | null;
   /** Вибраний відрізок (панель «Повітропровід») — товстою синьою лінією. */
   segment?: { id: number; index: number } | null;
+  /** Траса, з якою працюють (панель «Повітропровід»): решта приглушені. */
+  focus?: number | null;
+  /** Траси, лінію яких не малюємо (режим «Повітропровід» — видно трубу); номер лишається. */
+  linesHidden?: ReadonlySet<number>;
+  /** Де стане перехід (м сцени) — кільце на трасі. */
+  marker?: PointM | null;
 }
 
 export interface RouteLayer {
@@ -121,6 +127,12 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
   svg.setAttribute('class', 'route-svg');
   element.append(svg);
 
+  const marker = document.createElement('span');
+  marker.className = 'route-marker';
+  marker.dataset.testid = 'route-marker';
+  marker.hidden = true;
+  element.append(marker);
+
   const parts = new Map<string, Parts>();
   const labels: HTMLElement[] = [];
   /** Вузли трас у метрах (траси незмінні — рахуємо раз). */
@@ -196,12 +208,15 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     p.segment.setAttribute('d', seg >= 0 ? linePath(projected.segments, seg, seg + 1) : '');
     const highlighted = data.highlight === id;
     const dim = data.highlight !== null && !highlighted;
-    // Поки будують нову трасу, готові приглушені — не сплутати, яку саме будуєш.
-    const background = data.highlight === null && data.draft !== null && key !== 'draft';
+    // Поки будують нову трасу, готові приглушені — не сплутати, яку саме будуєш;
+    // так само — усі, крім траси, з якою працюють у панелі «Повітропровід».
+    const unfocused = data.focus !== null && data.focus !== undefined && data.focus !== id;
+    const background = data.highlight === null && ((data.draft !== null && key !== 'draft') || unfocused);
+    const noLine = key !== 'draft' && !!data.linesHidden?.has(id);
     p.group.setAttribute(
       'class',
       `route${key === 'draft' ? ' route--draft' : ''}${highlighted ? ' route--highlight' : ''}` +
-        `${dim ? ' route--dim' : ''}${background ? ' route--background' : ''}`,
+        `${dim ? ' route--dim' : ''}${background ? ' route--background' : ''}${noLine ? ' route--no-line' : ''}`,
     );
     const first = projected.nodes[0];
     p.tag.hidden = !first?.visible;
@@ -277,6 +292,10 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
       parts.delete(key);
     }
     for (let i = labelCount; i < labels.length; i++) labels[i]!.hidden = true;
+    // Кільце там, де стане перехід.
+    const m = data.marker ? viewer.projectPoint(data.marker) : null;
+    marker.hidden = !m?.visible;
+    if (m?.visible) marker.style.transform = `translate(${fmt(m.x)}px, ${fmt(m.y)}px) translate(-50%, -50%)`;
   };
 
   const stopFrames = viewer.onFrame(draw);

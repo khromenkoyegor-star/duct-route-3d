@@ -47,7 +47,8 @@ export function createDuctLayer(viewer: Viewer): DuctLayer {
   group.name = 'ducts';
   viewer.add(group);
   const material = createGalvanizedMaterial();
-  const problemMaterial = createHighlightMaterial(PROBLEM_COLOR);
+  // Закороткий відрізок — яскраво, щоб було видно навіть дрібно на iPhone.
+  const problemMaterial = createHighlightMaterial(PROBLEM_COLOR, 0.75);
   const selectedMaterial = createHighlightMaterial(SELECTED_COLOR);
   const entries = new Map<number, Entry>();
   let selected: Mesh | null = null;

@@ -125,6 +125,8 @@ export interface Viewer {
   enableMetalLighting(): void;
   /** Прозорість скану: 0 — непрозорий, 0,9 — майже прозорий (видно повітропровід крізь стіни). */
   setScanTransparency(transparency: number): void;
+  /** Скільки метрів сцени в одному CSS-пікселі на відстані `distance` (м) від камери. */
+  metresPerPixelAt(distance: number): number;
   /** Промінь з камери через екранну точку (CSS px): початок і одиничний напрямок, м. */
   screenRay(clientX: number, clientY: number): { origin: Vec3Like; direction: Vec3Like } | null;
   /** Викликається після кожного намальованого кадру. Повертає функцію відписки. */
@@ -594,6 +596,10 @@ export function createViewer(container: HTMLElement): Viewer {
       scanTransparency = t;
       applyScanTransparency();
       requestRender();
+    },
+    metresPerPixelAt(distance) {
+      const height = Math.max(1, canvas.getBoundingClientRect().height);
+      return (2 * Math.max(0, distance) * Math.tan((camera.fov * Math.PI) / 360)) / height;
     },
     screenRay(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
