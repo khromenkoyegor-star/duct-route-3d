@@ -9,6 +9,8 @@ import {
   formatSection,
   isValidDuctSpec,
   isValidSection,
+  pickDuctSegment,
+  raySegmentDistance,
   RECT_ELBOW_INNER_R_MM,
   roundElbowPolyline,
   sectionsBySegment,
@@ -294,5 +296,32 @@ describe('довга траса', () => {
     expect(performance.now() - t0).toBeLessThan(200);
     expect(layout.elbows).toHaveLength(598);
     expect(layout.problems).toHaveLength(0);
+  });
+});
+
+describe('вибір відрізка дотиком по трубі', () => {
+  it('промінь крізь трубу вибирає її відрізок; повз — нічого; з двох — ближчий до камери', () => {
+    let set = addRoute(emptyRouteSet(), L_ROUTE).set;
+    set = withRouteDuct(set, 1, spec(round(200)));
+    // Згори вниз на середину першого відрізка (500; 2400; 0).
+    const down = { x: 0, y: -1, z: 0 };
+    expect(pickDuctSegment({ x: 500, y: 5000, z: 0 }, down, set.routes)).toEqual({ routeId: 1, segment: 0 });
+    // На 90 мм убік — ще всередині труби Ø200 (+ запас).
+    expect(pickDuctSegment({ x: 500, y: 5000, z: 90 }, down, set.routes)).toEqual({ routeId: 1, segment: 0 });
+    // На 400 мм убік — повз.
+    expect(pickDuctSegment({ x: 500, y: 5000, z: 400 }, down, set.routes)).toBeNull();
+    // Уздовж X на висоті траси з боку −X: перший на шляху — відрізок 0.
+    expect(pickDuctSegment({ x: -3000, y: 2400, z: 0 }, { x: 1, y: 0, z: 0 }, set.routes)?.segment).toBe(0);
+    // Траса без повітропроводу не вибирається.
+    expect(pickDuctSegment({ x: 500, y: 5000, z: 0 }, down, addRoute(emptyRouteSet(), L_ROUTE).set.routes)).toBeNull();
+  });
+
+  it('відстань промінь — відрізок', () => {
+    const r = raySegmentDistance({ x: 0, y: 10, z: 0 }, { x: 0, y: -1, z: 0 }, { x: -5, y: 0, z: 3 }, { x: 5, y: 0, z: 3 });
+    expect(r.distance).toBeCloseTo(3, 9);
+    expect(r.t).toBeCloseTo(10, 9);
+    // Відрізок позаду камери не «вибирається» спереду.
+    const behind = raySegmentDistance({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, { x: -1, y: 0, z: -5 }, { x: 1, y: 0, z: -5 });
+    expect(behind.distance).toBeCloseTo(5, 9);
   });
 });

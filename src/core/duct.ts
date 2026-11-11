@@ -432,3 +432,49 @@ export function withRouteDuct(set: RouteSet, id: number, duct: DuctSpec | null):
   if (duct && !isValidDuctSpec(duct, route.nodes.length - 1)) throw new RangeError('Повітропровід не за правилами');
   return { routes: set.routes.map((r) => (r.id === id ? { ...r, duct } : r)), nextId: set.nextId };
 }
+
+/**
+ * Найменша відстань між променем (o + d·t, t ≥ 0; d — одиничний) і відрізком AB.
+ * Повертає відстань і t — наскільки далеко по променю (для вибору найближчого).
+ */
+export function raySegmentDistance(o: P3, d: P3, a: P3, b: P3): { distance: number; t: number } {
+  const ab = sub(b, a);
+  const w = sub(o, a);
+  const aa = dot(ab, ab);
+  const bd = dot(ab, d);
+  const denom = aa - bd * bd;
+  // s — параметр на відрізку (0…1), t — на промені.
+  let s = denom > 1e-12 ? (dot(ab, w) - bd * dot(d, w)) / denom : 0;
+  s = Math.min(1, Math.max(0, s));
+  let t = dot(sub(add(a, scale(ab, s)), o), d);
+  if (t < 0) {
+    t = 0;
+    s = aa > 0 ? Math.min(1, Math.max(0, dot(sub(o, a), ab) / aa)) : 0;
+  }
+  const onRay = add(o, scale(d, t));
+  const onSeg = add(a, scale(ab, s));
+  return { distance: length(sub(onRay, onSeg)), t };
+}
+
+/**
+ * Вибір відрізка повітропроводу дотиком: промінь (мм) → найближчий по променю відрізок, до осі якого
+ * промінь проходить не далі за половину перерізу (+ запас на палець, мм). Траси без повітропроводу — пропускаються.
+ */
+export function pickDuctSegment(
+  origin: P3,
+  direction: P3,
+  routes: readonly { id: number; nodes: readonly PointMm[]; duct?: DuctSpec | null }[],
+  slackMm = 30,
+): { routeId: number; segment: number } | null {
+  let best: { routeId: number; segment: number; t: number } | null = null;
+  for (const route of routes) {
+    if (!route.duct) continue;
+    const sections = sectionsBySegment(route.duct, route.nodes.length - 1);
+    for (let i = 0; i + 1 < route.nodes.length; i++) {
+      const hit = raySegmentDistance(origin, direction, route.nodes[i]!, route.nodes[i + 1]!);
+      if (hit.distance > sectionSpanMm(sections[i]!) / 2 + slackMm) continue;
+      if (!best || hit.t < best.t) best = { routeId: route.id, segment: i, t: hit.t };
+    }
+  }
+  return best ? { routeId: best.routeId, segment: best.segment } : null;
+}

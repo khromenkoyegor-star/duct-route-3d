@@ -1,6 +1,6 @@
 /**
  * Збирає інтерфейс: відкриття скану, «Показати все», «Рулетка», «Траса», «Видалити траєкторію»,
- * кнопки видів X/Y/Z. Одночасно працює лише один інструмент.
+ * «Повітропровід», кнопки видів X/Y/Z. Одночасно працює лише один інструмент.
  * Інформація про скан (габарит, зсув, попередження) — у стані для тестів; на екрані постійно
  * не показується (на прохання Єгора), лише віконце, якщо скан завеликий для пристрою.
  */
@@ -15,12 +15,16 @@ import {
   type ScanFile,
 } from '../scene/scan-loader';
 import type { Viewer } from '../scene/viewer';
-import { formatPointCount, type RouteSet } from '../core/route';
+import { type DuctProblem, type DuctSpec, ductLayout, formatSection, pickDuctSegment, sectionsBySegment } from '../core/duct';
+import { formatPointCount, type RouteSet, toMm } from '../core/route';
+import { createDuctLayer } from '../scene/duct-layer';
 import { createAlert, createChoice, createProgress } from './dialogs';
+import { createDuctPanel, type DuctSelection, type ViewMode } from './duct-panel';
 import { closedEditorState, createPointEditor } from './point-editor';
 import { createRouteDelete } from './route-delete';
 import { createRouteTool, type RouteToolState } from './route-tool';
 import { createRuler, type RulerState } from './ruler';
+import { onTap } from './tap';
 import { createToolbar, type ToolName } from './toolbar';
 import { createViewBar } from './view-bar';
 import { freeAreaCenter } from './visibility';
@@ -35,8 +39,20 @@ export interface AppState {
   routes: RouteToolState;
   /** Увімкнений інструмент. */
   tool: ToolName;
+  /** Повітропроводи: показ, прозорість скану, вибір у панелі, розміри й проблеми трас. */
+  ducts: DuctsState;
   /** Остання помилка відкриття (для тестів). */
   error: string | null;
+}
+
+export interface DuctsState {
+  mode: ViewMode;
+  /** Прозорість скану 0…0,9. */
+  transparency: number;
+  selection: DuctSelection | null;
+  routes: Array<{ id: number; duct: DuctSpec | null; sections: string[]; problems: DuctProblem[] }>;
+  /** Трикутників у всіх повітропроводах (перевірка, що пам'ять звільняється). */
+  triangles: number;
 }
 
 export interface App {
@@ -45,6 +61,8 @@ export interface App {
   openFiles(files: readonly ScanFile[]): Promise<void>;
   /** Підставити траси (тести; пізніше — відкриття збереженого проєкту). */
   loadRoutes(set: RouteSet): void;
+  /** Габарит 3D-повітропроводу траси в мм (для тестів) або null. */
+  ductBox(routeId: number): ReturnType<ReturnType<typeof createDuctLayer>['boxMm']>;
 }
 
 const PHASE_TEXT: Record<LoadPhase, string> = {
@@ -86,6 +104,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       editor: closedEditorState(),
     },
     tool: 'none',
+    ducts: { mode: 'both', transparency: 0, selection: null, routes: [], triangles: 0 },
     error: null,
   };
 
@@ -135,6 +154,40 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     onEditingChange,
   });
 
+  // Повітропроводи трас (3D) і панель «Повітропровід».
+  const ductLayer = createDuctLayer(viewer);
+  const ductPanel = createDuctPanel({
+    onDuct: (id, duct) => route.setDuct(id, duct),
+    onSelect: (selection) => {
+      // Вибрали іншу трасу — показати її цілком у вільній від панелей частині екрана.
+      if (selection && selection.routeId !== state.ducts.selection?.routeId) route.reveal(selection.routeId);
+      state.ducts.selection = selection;
+      route.setSegmentHighlight(selection && selection.segment !== null ? { id: selection.routeId, index: selection.segment } : null);
+      syncRouteUi();
+    },
+    onMode: (mode) => {
+      state.ducts.mode = mode;
+      applyViewMode();
+    },
+    onTransparency: (transparency) => {
+      state.ducts.transparency = transparency;
+      viewer.setScanTransparency(transparency);
+    },
+    onClose: () => requestTool('none'),
+  });
+  // Дотик по трубі на сцені вибирає відрізок (для переходу), поки відкрита панель «Повітропровід».
+  onTap(viewer.canvas, {
+    onTap: (x, y) => {
+      if (state.tool !== 'duct') return;
+      const ray = viewer.screenRay(x, y);
+      if (!ray) return;
+      // Початок променя — точка (м → мм); напрямок — одиничний, без одиниць.
+      const hit = pickDuctSegment(toMm(ray.origin), ray.direction, state.routes.set.routes);
+      const current = ductPanel.selection;
+      ductPanel.select(hit ?? (current ? { routeId: current.routeId, segment: null } : null));
+    },
+  });
+
   const routeDelete = createRouteDelete({
     onSelect: (id) => {
       route.setHighlight(id);
@@ -175,17 +228,43 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     onRuler: () => toggleTool('ruler'),
     onRoute: () => toggleTool('route'),
     onRouteDelete: () => toggleTool('delete'),
+    onDuct: () => toggleTool('duct'),
   });
 
   // Інтерфейс створено — тепер зміни трас можна показувати на кнопках і в списку.
   ready = true;
   syncRouteUi();
 
-  /** Кнопка «Видалити траєкторію» активна, лише коли є траси; відкритий список — актуальний. */
+  /**
+   * Траси змінились: кнопки «Видалити траєкторію» й «Повітропровід» активні, лише коли є траси;
+   * відкриті списки й 3D-повітропроводи — актуальні.
+   */
   function syncRouteUi(): void {
     if (!ready) return;
-    toolbar.setHasRoutes(state.routes.set.routes.length > 0);
-    if (routeDelete.open) routeDelete.show(state.routes.set.routes);
+    const routes = state.routes.set.routes;
+    toolbar.setHasRoutes(routes.length > 0);
+    if (routeDelete.open) routeDelete.show(routes);
+    if (ductPanel.open) ductPanel.show(routes, state.ducts.mode, state.ducts.transparency);
+    const selection = ductPanel.open ? ductPanel.selection : null;
+    ductLayer.update(
+      routes,
+      selection && selection.segment !== null ? { routeId: selection.routeId, segment: selection.segment } : null,
+    );
+    state.ducts.selection = selection;
+    state.ducts.routes = routes.map((r) => ({
+      id: r.id,
+      duct: r.duct ?? null,
+      sections: r.duct ? sectionsBySegment(r.duct, r.nodes.length - 1).map(formatSection) : [],
+      problems: r.duct ? ductLayout(r.nodes, r.duct).problems : [],
+    }));
+    state.ducts.triangles = ductLayer.triangles;
+  }
+
+  /** «Траса / Повітропровід / Обидва»: лінії трас ховаються лише поза побудовою траси. */
+  function applyViewMode(): void {
+    const mode = state.ducts.mode;
+    route.layer.hidden = mode === 'duct' && state.tool !== 'route';
+    ductLayer.setVisible(mode !== 'route');
   }
 
   /** Увімкнути інструмент (решта вимикаються). */
@@ -195,11 +274,19 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     route.setActive(next === 'route');
     if (next === 'delete') routeDelete.show(route.state.set.routes);
     else routeDelete.hide();
+    if (next === 'duct') ductPanel.show(route.state.set.routes, state.ducts.mode, state.ducts.transparency);
+    else if (ductPanel.open) {
+      ductPanel.hide();
+      route.setSegmentHighlight(null);
+    }
     route.setHighlight(null);
+    applyViewMode();
+    syncRouteUi();
     toolbar.setActiveTool(next);
     root.classList.toggle('is-ruler', next === 'ruler');
     root.classList.toggle('is-route', next === 'route');
     root.classList.toggle('is-route-delete', next === 'delete');
+    root.classList.toggle('is-duct', next === 'duct');
   }
 
   /**
@@ -236,6 +323,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     ruler.panel,
     route.panel,
     routeDelete.element,
+    ductPanel.element,
     editor.element,
     progress.element,
     alert.element,
@@ -330,5 +418,6 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     },
     openFiles,
     loadRoutes: (set) => route.load(set),
+    ductBox: (routeId) => ductLayer.boxMm(routeId),
   };
 }

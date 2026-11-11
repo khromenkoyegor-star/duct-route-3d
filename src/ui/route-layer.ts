@@ -26,6 +26,8 @@ export interface RouteLayerData {
   draft: RouteDraft | null;
   /** Підсвічена траса (вибрана у списку на видалення) або null. */
   highlight: number | null;
+  /** Вибраний відрізок (панель «Повітропровід») — товстою синьою лінією. */
+  segment?: { id: number; index: number } | null;
 }
 
 export interface RouteLayer {
@@ -53,6 +55,7 @@ interface Parts {
   pending: SVGPathElement;
   nodes: SVGPathElement;
   pendingNode: SVGPathElement;
+  segment: SVGPathElement;
   tag: HTMLElement;
 }
 
@@ -137,13 +140,14 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     const halo = make('route-halo');
     const line = make('route-line');
     const pending = make('route-line route-line--pending');
+    const segment = make('route-line route-line--segment');
     const nodes = make('route-nodes');
     const pendingNode = make('route-nodes route-nodes--pending');
     const tag = document.createElement('span');
     tag.className = 'route-tag';
     svg.append(group);
     element.append(tag);
-    p = { group, halo, line, pending, nodes, pendingNode, tag };
+    p = { group, halo, line, pending, nodes, pendingNode, segment, tag };
     parts.set(key, p);
     return p;
   };
@@ -188,6 +192,8 @@ export function createRouteLayer(viewer: Viewer): RouteLayer {
     p.pending.setAttribute('d', pending ? linePath(projected.segments, confirmedSegments) : '');
     p.nodes.setAttribute('d', circlesPath(projected.nodes, nodes.length));
     p.pendingNode.setAttribute('d', pending ? circlesPath(projected.nodes.slice(nodes.length)) : '');
+    const seg = data.segment && data.segment.id === id && key !== 'draft' ? data.segment.index : -1;
+    p.segment.setAttribute('d', seg >= 0 ? linePath(projected.segments, seg, seg + 1) : '');
     const highlighted = data.highlight === id;
     const dim = data.highlight !== null && !highlighted;
     // Поки будують нову трасу, готові приглушені — не сплутати, яку саме будуєш.
