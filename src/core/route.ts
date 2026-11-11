@@ -8,6 +8,7 @@
  *
  * Дані — єдине джерело правди; 3D будується з них. Чиста логіка: без Three.js і без DOM.
  */
+import type { DuctSpec } from './duct';
 import type { NudgeAxis } from './nudge';
 import { mmToM, mToMm } from './units';
 
@@ -25,6 +26,8 @@ export interface Route {
   /** Номер траси («Траса 3»). Не змінюється. */
   readonly id: number;
   readonly nodes: readonly PointMm[];
+  /** Повітропровід траси (розмір і переходи) або null — ще не задано (див. duct.ts). */
+  readonly duct?: DuctSpec | null;
 }
 
 export interface RouteSet {
