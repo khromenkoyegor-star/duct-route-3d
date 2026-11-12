@@ -31,11 +31,13 @@ export function freeAreaRect(): ScreenRect | null {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const obstacles = obstacleRects();
+  // Виріз і «острівець» iPhone (safe areas) — теж не вільне місце.
+  const safe = safeInsets();
   const free = (left: number, right: number): ScreenRect => {
     const overlapping = obstacles.filter((r) => r.right > left && r.left < right);
-    const top = Math.max(0, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
-    const bottom = Math.min(vh, ...overlapping.filter((r) => r.top >= vh / 2).map((r) => r.top));
-    return { left, right, top, bottom };
+    const top = Math.max(safe.top, ...overlapping.filter((r) => r.top < vh / 2).map((r) => r.bottom));
+    const bottom = Math.min(vh - safe.bottom, ...overlapping.filter((r) => r.top >= vh / 2).map((r) => r.top));
+    return { left: Math.max(left, safe.left), right: Math.min(right, vw - safe.right), top, bottom };
   };
   // Межі, по яких можна «розрізати» екран: краї редактора точки й високих бічних панелей.
   const editor = [...document.querySelectorAll<HTMLElement>('.point-editor')].find((el) => !el.hidden);
@@ -55,6 +57,22 @@ export function freeAreaRect(): ScreenRect | null {
   }
   if (!best || score(best) < 60) return null;
   return best;
+}
+
+let probe: HTMLElement | null = null;
+/** Відступи safe areas (px): невидимий елемент з padding: env(safe-area-inset-*). */
+function safeInsets(): { top: number; right: number; bottom: number; left: number } {
+  if (!probe) {
+    probe = document.createElement('div');
+    probe.setAttribute('aria-hidden', 'true');
+    probe.style.cssText =
+      'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
+      'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+    document.body.append(probe);
+  }
+  const s = getComputedStyle(probe);
+  const px = (v: string) => Number.parseFloat(v) || 0;
+  return { top: px(s.paddingTop), right: px(s.paddingRight), bottom: px(s.paddingBottom), left: px(s.paddingLeft) };
 }
 
 /** Центр вільної від панелей частини екрана (див. freeAreaRect) або null. */

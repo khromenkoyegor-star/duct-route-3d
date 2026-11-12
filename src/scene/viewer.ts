@@ -4,17 +4,21 @@ import {
   GridHelper,
   Group,
   type Material,
+  type Mesh,
   type Object3D,
+  PMREMGenerator,
   PerspectiveCamera,
   Quaternion,
   Raycaster,
   Scene,
   Sphere,
+  type Texture,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mmToM } from '../core/units';
 import { type AxisName, createAxes } from './axes';
 import { currentTheme, type SceneTheme, watchTheme } from './theme';
@@ -114,6 +118,17 @@ export interface Viewer {
   /** Додати/прибрати допоміжний об'єкт (лінія рулетки тощо). */
   add(object: Object3D): void;
   remove(object: Object3D): void;
+  /**
+   * Освітлення для металевих (PBR) матеріалів — «кімната» RoomEnvironment. Вмикається один раз,
+   * коли з'являється перший повітропровід; на скан (MeshBasicMaterial) не впливає.
+   */
+  enableMetalLighting(): void;
+  /** Прозорість скану: 0 — непрозорий, 0,9 — майже прозорий (видно повітропровід крізь стіни). */
+  setScanTransparency(transparency: number): void;
+  /** Скільки метрів сцени в одному CSS-пікселі на відстані `distance` (м) від камери. */
+  metresPerPixelAt(distance: number): number;
+  /** Промінь з камери через екранну точку (CSS px): початок і одиничний напрямок, м. */
+  screenRay(clientX: number, clientY: number): { origin: Vec3Like; direction: Vec3Like } | null;
   /** Викликається після кожного намальованого кадру. Повертає функцію відписки. */
   onFrame(callback: () => void): () => void;
   /** Скільки кадрів намальовано — для тестів. */
@@ -259,6 +274,26 @@ export function createViewer(container: HTMLElement): Viewer {
   const raycaster = new Raycaster();
   const pointer = new Vector2();
 
+  /** Освітлення металу (див. enableMetalLighting) і прозорість скану. */
+  let environment: Texture | null = null;
+  let scanTransparency = 0;
+  /** Застосувати прозорість до всіх матеріалів скану (зокрема щойно відкритого). */
+  function applyScanTransparency(): void {
+    const opacity = 1 - scanTransparency;
+    scanGroup.traverse((object) => {
+      const material = (object as Mesh).material as Material | Material[] | undefined;
+      if (!material) return;
+      for (const m of Array.isArray(material) ? material : [material]) {
+        const transparent = opacity < 1;
+        if (m.transparent !== transparent) m.needsUpdate = true;
+        m.transparent = transparent;
+        m.opacity = opacity;
+        // Напівпрозорий скан не закриває повітропровід у буфері глибини.
+        m.depthWrite = !transparent;
+      }
+    });
+  }
+
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(container);
   resize();
@@ -398,6 +433,7 @@ export function createViewer(container: HTMLElement): Viewer {
       cachedScanBox = null;
       if (root) {
         scanGroup.add(root);
+        applyScanTransparency();
         scanGroup.updateMatrixWorld(true);
         const box = new Box3().setFromObject(scanGroup, true);
         cachedScanBox = box.isEmpty() ? null : box;
@@ -545,6 +581,35 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.update();
       requestRender();
     },
+    enableMetalLighting() {
+      if (environment) return;
+      const pmrem = new PMREMGenerator(renderer);
+      const room = new RoomEnvironment();
+      environment = pmrem.fromScene(room, 0.04).texture;
+      room.dispose();
+      pmrem.dispose();
+      scene.environment = environment;
+      requestRender();
+    },
+    setScanTransparency(transparency) {
+      const t = Math.min(0.9, Math.max(0, Number.isFinite(transparency) ? transparency : 0));
+      scanTransparency = t;
+      applyScanTransparency();
+      requestRender();
+    },
+    metresPerPixelAt(distance) {
+      const height = Math.max(1, canvas.getBoundingClientRect().height);
+      return (2 * Math.max(0, distance) * Math.tan((camera.fov * Math.PI) / 360)) / height;
+    },
+    screenRay(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+      camera.updateMatrixWorld();
+      raycaster.setFromCamera(pointer, camera);
+      const { origin, direction } = raycaster.ray;
+      return { origin: { x: origin.x, y: origin.y, z: origin.z }, direction: { x: direction.x, y: direction.y, z: direction.z } };
+    },
     add(object) {
       scene.add(object);
       requestRender();
@@ -566,6 +631,8 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.dispose();
       disposeGrid(grid);
       axes.dispose();
+      environment?.dispose();
+      scene.environment = null;
       scene.clear();
       renderer.dispose();
       canvas.remove();

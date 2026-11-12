@@ -20,7 +20,8 @@ jobs:
   test:
     name: Збірка і тести
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Повний набір (≈ 550 сценаріїв у WebKit на трьох профілях) іде ≈ 20 хв — із запасом.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
 

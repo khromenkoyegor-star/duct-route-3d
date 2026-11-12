@@ -1911,3 +1911,445 @@ body {
     max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 2 * var(--gap) - 52px);
   }
 }
+
+/* ───────── Етап 4: повітропровід ───────── */
+
+/* Вибраний відрізок траси (панель «Повітропровід») — товста синя лінія поверх траси. */
+.route-line--segment {
+  stroke: var(--tint);
+  stroke-width: 8;
+}
+
+/* Панель «Повітропровід» — під кнопками справа (iPad), зверху на всю ширину (iPhone); прокручується. */
+.duct-panel {
+  top: calc(var(--safe-top) + var(--gap) + 44px + 8px);
+  right: calc(var(--safe-right) + var(--gap));
+  width: 360px;
+  max-width: calc(100% - var(--safe-left) - var(--safe-right) - 2 * var(--gap));
+  max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 2 * var(--gap) - 52px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  pointer-events: auto;
+  background: var(--solid-panel-bg);
+}
+
+.duct-section-title {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.duct-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.duct-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 44px;
+  padding: 4px 12px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: var(--solid-fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.duct-chip--on {
+  border-color: var(--tint);
+  color: var(--tint);
+}
+
+.duct-chip-size {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--label-secondary);
+}
+
+/* Сегментований перемикач у стилі iOS. */
+.segmented {
+  display: flex;
+  margin-top: 10px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--solid-fill);
+}
+
+.segmented-option {
+  flex: 1 1 0;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.segmented-option--on {
+  background: var(--solid-panel-bg);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.duct-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.duct-row-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Системний список (на iPhone — колесо вибору); шрифт ≥ 16 px — Safari не збільшує сторінку. */
+.duct-select {
+  flex: 1 1 auto;
+  min-width: 140px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--solid-fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 17px;
+}
+
+.mm-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mm-field-label {
+  font-size: 13px;
+  color: var(--label-secondary);
+}
+
+.mm-input {
+  width: 92px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--solid-fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.mm-field-unit {
+  display: none;
+}
+
+.duct-times {
+  align-self: flex-end;
+  padding-bottom: 10px;
+  font-size: 17px;
+  color: var(--label-secondary);
+}
+
+.duct-apply {
+  width: auto;
+  align-self: flex-end;
+  padding: 6px 16px;
+}
+
+.duct-row--rect {
+  flex-wrap: nowrap;
+}
+
+.duct-segment-list {
+  max-height: 240px;
+  margin: 0;
+}
+
+.duct-segment--problem {
+  border-color: var(--danger);
+}
+
+.duct-segment--problem .route-row-meta {
+  color: var(--danger);
+}
+
+.duct-transitions {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.duct-transition-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.icon-button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.panel-button--danger-text {
+  width: auto;
+  color: var(--danger);
+}
+
+.duct-problems {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.duct-problems p {
+  margin: 0;
+}
+
+.duct-problems p + p {
+  margin-top: 6px;
+}
+
+.duct-view {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 0.5px solid var(--panel-border);
+}
+
+.duct-opacity {
+  display: block;
+}
+
+.duct-range {
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--tint);
+}
+
+/* iPhone вертикально: панель — зверху під кнопками видів, на всю ширину, над нижніми кнопками. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .duct-panel {
+    left: calc(var(--safe-left) + var(--gap));
+    width: auto;
+    max-height: calc(
+      100% - var(--safe-top) - var(--safe-bottom) - 3 * var(--gap) - 52px - var(--toolbar-h) - 8px
+    );
+  }
+}
+
+/* iPhone горизонтально: панель справа на всю доступну висоту. */
+@media (max-height: 500px) {
+  .duct-panel {
+    width: 340px;
+    padding: 8px 12px;
+  }
+
+  .duct-segment-list {
+    max-height: none;
+  }
+}
+
+/* Рядок відрізка — в один рядок: «1 · X +2 500 мм» ліворуч, розмір праворуч. */
+.duct-segment {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.duct-segment .route-row-name {
+  font-size: 15px;
+}
+
+.duct-segment .route-row-meta {
+  text-align: right;
+}
+
+/* iPhone вертикально: панель не вища за ~45 % екрана (решта прокручується) — під нею видно трасу. */
+@media (max-width: 699px) and (min-height: 501px) {
+  .duct-panel {
+    max-height: 46vh;
+    max-height: 46dvh;
+  }
+
+  .duct-segment-list {
+    max-height: none;
+  }
+}
+
+/* ───────── Етап 4: правки за UX-рецензією ───────── */
+
+/* Вибраний відрізок — синій (червоне в цій панелі означає «закороткий»). */
+.duct-segment--selected,
+.duct-segment.route-row--selected {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+.duct-segment--problem {
+  border-color: var(--danger);
+}
+
+.duct-segment--problem .route-row-meta {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Редактор переходу — одразу під вибраним рядком. */
+.duct-transition {
+  margin: 6px 0 4px;
+  padding: 2px 10px 10px;
+  border-radius: 12px;
+  background: var(--tint-soft);
+}
+
+.duct-transition .duct-section-title {
+  margin-top: 8px;
+}
+
+.duct-chip {
+  position: relative;
+}
+
+.duct-chip-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.mm-input--invalid {
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+.duct-hint {
+  margin-top: 6px;
+}
+
+.duct-message {
+  margin-top: 6px;
+}
+
+.duct-apply {
+  white-space: nowrap;
+}
+
+.segmented-option {
+  min-height: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .segmented-option--on {
+    background: #636366;
+  }
+}
+
+.duct-opacity-caption {
+  display: block;
+  margin: 12px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.duct-opacity-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label);
+  text-transform: none;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Траси з трубою в режимі «Повітропровід»: лінію не малюємо, номер лишається. */
+.route--no-line .route-halo,
+.route--no-line .route-line:not(.route-line--segment),
+.route--no-line .route-nodes {
+  display: none;
+}
+
+/* Де стане перехід — кільце на трасі. */
+.route-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--tint);
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 1px 4px rgba(0, 0, 0, 0.35);
+  will-change: transform;
+}
+
+/* iPad шириною 900–1279 px: шість кнопок із середніми назвами (повні не вміщаються поруч із X/Y/Z). */
+.tool-label-medium {
+  display: none;
+}
+
+@media (min-width: 900px) and (max-width: 1279px) and (min-height: 501px) {
+  .tool-label {
+    display: none;
+  }
+
+  .tool-label-medium {
+    display: inline;
+  }
+
+  .toolbar {
+    gap: 6px;
+  }
+
+  .tool-button {
+    padding: 0 12px;
+  }
+}

@@ -24,6 +24,7 @@ import {
   toM,
   toMm,
 } from '../core/route';
+import { type DuctSpec, isValidDuctSpec, withRouteDuct } from '../core/duct';
 import { formatMm, mToMm } from '../core/units';
 import type { Viewer, ViewSnapshot } from '../scene/viewer';
 import { closedEditorState, type PointEditor, type PointEditorHandlers, type PointEditorState } from './point-editor';
@@ -58,6 +59,12 @@ export interface RouteTool {
   remove(id: number): void;
   /** Підсвітити трасу (null — зняти). */
   setHighlight(id: number | null): void;
+  /** Підсвітити відрізок траси (панель «Повітропровід»; null — зняти). */
+  setSegmentHighlight(segment: { id: number; index: number } | null): void;
+  /** Панель «Повітропровід»: траса, з якою працюють; приховані лінії трас; маркер переходу (м). */
+  setDuctView(view: { focus: number | null; linesHidden: ReadonlySet<number>; marker: PointM | null }): void;
+  /** Задати (null — прибрати) повітропровід траси: розмір і переходи (core/duct.ts). */
+  setDuct(id: number, duct: DuctSpec | null): void;
   /** Показати трасу цілком у вільній від панелей частині екрана (якщо її щось закриває). */
   reveal(id: number): void;
   /** Прибрати всі траси (відкрили інший скан). Номери починаються знову з 1. */
@@ -149,6 +156,12 @@ export function createRouteTool(
   /** Точка, яку доводять / тягнуть (м) — для лінії на сцені. */
   let pending: PointM | null = null;
   let highlight: number | null = null;
+  let segmentHighlight: { id: number; index: number } | null = null;
+  let ductView: { focus: number | null; linesHidden: ReadonlySet<number>; marker: PointM | null } = {
+    focus: null,
+    linesHidden: new Set(),
+    marker: null,
+  };
   let missed = false;
   let downView: ViewSnapshot | null = null;
   const retap = createRetapGuard(() => render());
@@ -220,6 +233,8 @@ export function createRouteTool(
       routes: set.routes,
       draft: active ? { id: set.nextId, nodes, pending: owns() ? pending : null } : null,
       highlight,
+      segment: segmentHighlight,
+      ...ductView,
     });
     handlers.onChange?.(state());
   }
@@ -329,6 +344,18 @@ export function createRouteTool(
       highlight = id;
       render();
     },
+    setSegmentHighlight(segment) {
+      segmentHighlight = segment;
+      render();
+    },
+    setDuctView(view) {
+      ductView = view;
+      render();
+    },
+    setDuct(id, duct) {
+      set = withRouteDuct(set, id, duct);
+      render();
+    },
     reveal(id) {
       const route = set.routes.find((r) => r.id === id);
       if (!route) return;
@@ -355,10 +382,15 @@ export function createRouteTool(
       render();
     },
     load(next) {
-      if (!next.routes.every((r) => isValidRoute(r.nodes) && r.id < next.nextId)) {
-        throw new RangeError('Траси мають бути за правилами, а nextId — більший за номери трас');
+      const ok = (r: (typeof next.routes)[number]) =>
+        isValidRoute(r.nodes) && r.id < next.nextId && (!r.duct || isValidDuctSpec(r.duct, r.nodes.length - 1));
+      if (!next.routes.every(ok)) {
+        throw new RangeError('Траси (і повітропроводи) мають бути за правилами, а nextId — більший за номери трас');
       }
-      set = { routes: next.routes.map((r) => ({ id: r.id, nodes: r.nodes.map((n) => ({ ...n })) })), nextId: next.nextId };
+      set = {
+        routes: next.routes.map((r) => ({ id: r.id, nodes: r.nodes.map((n) => ({ ...n })), duct: r.duct ?? null })),
+        nextId: next.nextId,
+      };
       highlight = null;
       render();
     },

@@ -1,7 +1,7 @@
-import { ICON_OPEN, ICON_ROUTE, ICON_RULER, ICON_SHOW_ALL, ICON_TRASH } from './icons';
+import { ICON_DUCT, ICON_OPEN, ICON_ROUTE, ICON_RULER, ICON_SHOW_ALL, ICON_TRASH } from './icons';
 
 /** Інструмент, який зараз увімкнено (одночасно — лише один). */
-export type ToolName = 'none' | 'ruler' | 'route' | 'delete';
+export type ToolName = 'none' | 'ruler' | 'route' | 'delete' | 'duct';
 
 export interface ToolbarHandlers {
   onOpen(): void;
@@ -9,26 +9,33 @@ export interface ToolbarHandlers {
   onRuler(): void;
   onRoute(): void;
   onRouteDelete(): void;
+  onDuct(): void;
 }
 
 export interface Toolbar {
   element: HTMLElement;
   /** Кнопки, які мають сенс лише з відкритим сканом. */
   setScanLoaded(loaded: boolean): void;
-  /** Чи є в сцені траси (інакше «Видалити траєкторію» неактивна). */
+  /** Чи є в сцені траси (інакше «Видалити траєкторію» і «Повітропровід» неактивні). */
   setHasRoutes(has: boolean): void;
   setActiveTool(tool: ToolName): void;
   setBusy(busy: boolean): void;
 }
 
-/** label — повна назва (iPad); short — коротка для нижньої панелі iPhone. */
-function makeButton(id: string, icon: string, label: string, short: string, onClick: () => void): HTMLButtonElement {
+/**
+ * label — повна назва (широкий iPad); medium — для iPad шириною 900–1279 px (6 кнопок мають вміститися
+ * поруч із X/Y/Z); short — для нижньої панелі iPhone.
+ */
+function makeButton(id: string, icon: string, label: string, medium: string, short: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'tool-button';
   button.dataset.testid = id;
-  button.innerHTML = `${icon}<span class="tool-label"></span><span class="tool-label-short" aria-hidden="true"></span>`;
+  button.innerHTML =
+    `${icon}<span class="tool-label"></span><span class="tool-label-medium" aria-hidden="true"></span>` +
+    '<span class="tool-label-short" aria-hidden="true"></span>';
   button.querySelector('.tool-label')!.textContent = label;
+  button.querySelector('.tool-label-medium')!.textContent = medium;
   button.querySelector('.tool-label-short')!.textContent = short;
   // На вузьких екранах видно лише іконку чи коротку назву — повна лишається для VoiceOver.
   button.setAttribute('aria-label', label);
@@ -42,20 +49,22 @@ export function createToolbar(handlers: ToolbarHandlers): Toolbar {
   element.className = 'toolbar';
   element.setAttribute('aria-label', 'Дії');
 
-  const open = makeButton('open-scan', ICON_OPEN, 'Відкрити скан', 'Відкрити', handlers.onOpen);
+  const open = makeButton('open-scan', ICON_OPEN, 'Відкрити скан', 'Відкрити', 'Відкрити', handlers.onOpen);
   open.classList.add('tool-button--primary');
-  const showAll = makeButton('show-all', ICON_SHOW_ALL, 'Показати все', 'Усе', handlers.onShowAll);
-  const ruler = makeButton('ruler', ICON_RULER, 'Рулетка', 'Рулетка', handlers.onRuler);
-  const route = makeButton('route', ICON_ROUTE, 'Траса', 'Траса', handlers.onRoute);
-  const routeDelete = makeButton('route-delete', ICON_TRASH, 'Видалити траєкторію', 'Видалити', handlers.onRouteDelete);
+  const showAll = makeButton('show-all', ICON_SHOW_ALL, 'Показати все', 'Показати все', 'Усе', handlers.onShowAll);
+  const ruler = makeButton('ruler', ICON_RULER, 'Рулетка', 'Рулетка', 'Рулетка', handlers.onRuler);
+  const route = makeButton('route', ICON_ROUTE, 'Траса', 'Траса', 'Траса', handlers.onRoute);
+  const routeDelete = makeButton('route-delete', ICON_TRASH, 'Видалити траєкторію', 'Видалити', 'Видалити', handlers.onRouteDelete);
+  const duct = makeButton('duct', ICON_DUCT, 'Повітропровід', 'Повітропровід', 'Труба', handlers.onDuct);
   const toggles: Array<[HTMLButtonElement, ToolName]> = [
     [ruler, 'ruler'],
     [route, 'route'],
     [routeDelete, 'delete'],
+    [duct, 'duct'],
   ];
   for (const [button] of toggles) button.setAttribute('aria-pressed', 'false');
 
-  element.append(open, showAll, ruler, route, routeDelete);
+  element.append(open, showAll, ruler, route, routeDelete, duct);
 
   let scanLoaded = false;
   let hasRoutes = false;
@@ -66,6 +75,7 @@ export function createToolbar(handlers: ToolbarHandlers): Toolbar {
     ruler.disabled = busy || !scanLoaded;
     route.disabled = busy || !scanLoaded;
     routeDelete.disabled = busy || !scanLoaded || !hasRoutes;
+    duct.disabled = busy || !scanLoaded || !hasRoutes;
   };
   sync();
 
