@@ -16,7 +16,7 @@ import {
   emptyRouteSet,
   formatPointCount,
   isValidRoute,
-  lastDirection,
+  lastHeading,
   type PointMm,
   type RouteSet,
   removeRoute,
@@ -80,6 +80,8 @@ const HINTS: Record<Exclude<RoutePhase, 'off'>, string> = {
   pull: 'Тягніть наступну точку джойстиком чи повзунком і підтвердьте',
 };
 const HINT_MISS = 'Тут немає поверхні скану — торкніться самого скану';
+/** Допуск напрямку відрізка в метрах сцени (0,0001 мм): похибка округлення координат вузлів. */
+const HEADING_TOLERANCE_M = 1e-7;
 const HINT_PULL_TAP = 'Наступна точка не ставиться дотиком — тягніть її джойстиком чи повзунком';
 /** Уперше за відкриття додатка тягнуть наступну точку — «посмикати» джойстик, щоб було видно чим. */
 let pullShown = false;
@@ -194,7 +196,9 @@ export function createRouteTool(
     const anchor = nodes.at(-1)!;
     phase = 'pull';
     pending = { ...anchor };
-    editor.edit(anchor, '', editing, { title: editorTitle(), segment: { anchor, back: lastDirection(nodes) } });
+    // Куди можна повернути далі, залежить від напрямку останнього відрізка (вісь або 45°).
+    const previous = lastHeading(nodes, HEADING_TOLERANCE_M)?.unit ?? null;
+    editor.edit(anchor, '', editing, { title: editorTitle(), segment: { anchor, previous } });
     handlers.onEditingChange?.(true);
     if (!pullShown) {
       pullShown = true;

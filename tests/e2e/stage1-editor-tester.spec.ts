@@ -185,7 +185,15 @@ const camera = (page: Page) =>
     const v = window.__trasa!.viewer.snapshotView();
     return [...v.position.toArray(), ...v.target.toArray()];
   });
-const cameraShift = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i]!)));
+/**
+ * Чи камера поверталась або зумилась: зміна вектора «камера − ціль». Паралельний зсув сюди не входить:
+ * з етапу 4.1 камера їде за точкою, яку джойстик виводить за край видимої частини (без повороту й зуму).
+ */
+const cameraTurn = (a: number[], b: number[]) =>
+  Math.max(...[0, 1, 2].map((i) => Math.abs(a[i]! - a[i + 3]! - (b[i]! - b[i + 3]!))));
+/** Паралельний зсув камери, м. Він дозволений лише «за точкою»: не більший, ніж проїхала сама точка. */
+const cameraPan = (a: number[], b: number[]) => Math.hypot(b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!);
+const travelled = (a: P3, b: P3) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 const changed = (a: P3, b: P3): Axis3[] => (['x', 'y', 'z'] as const).filter((k) => a[k] !== b[k]);
 const along = (d: V2, px: number): V2 => ({ x: Math.round(d.x * px), y: Math.round(d.y * px) });
 const knob = (page: Page, id = 'stick-xz') => page.locator(`[data-testid="${id}"] .stick-knob`);
@@ -496,7 +504,8 @@ test.describe('Редактор точки (tester): фіксація осі, в
     const after = await editorPoint(page);
     expect(changed(p0, during), 'мишка тягнула джойстик — точка мала поїхати').toHaveLength(1);
     expect(changed(p0, after)).toHaveLength(1);
-    expect(cameraShift(cam0, cam1), 'камера не крутилась, поки мишка йшла по скану').toBeLessThan(1e-9);
+    expect(cameraTurn(cam0, cam1), 'камера не крутилась, поки мишка йшла по скану').toBeLessThan(1e-9);
+    expect(cameraPan(cam0, cam1), 'камера зсувається лише за точкою').toBeLessThanOrEqual(travelled(p0, during) + 1e-6);
     const s = await state(page);
     expect(s.ruler.editor.origin, 'нова точка не ставилась').toEqual(p0);
     await expect(knob(page)).toHaveText('');
@@ -581,7 +590,8 @@ test.describe('Редактор точки (tester): джойстик і кам�
     }, spot);
     expect(changed(p0, r.editor.point!)).toHaveLength(1);
     expect(r.editor.origin, 'точку не переставлено').toEqual(p0);
-    expect(cameraShift(cam0, r.cam), 'камера зрушила, хоча палець на скані не рухався').toBeLessThan(1e-6);
+    expect(cameraTurn(cam0, r.cam), 'камера повернулась, хоча палець на скані не рухався').toBeLessThan(1e-6);
+    expect(cameraPan(cam0, r.cam), 'камера зсувається лише за точкою').toBeLessThanOrEqual(travelled(p0, r.editor.point!) + 1e-6);
   });
 
   test('те саме справжніми дотиками (Chromium, два пальці через CDP): камера не крутиться від руху джойстика', async ({
@@ -612,12 +622,13 @@ test.describe('Редактор точки (tester): джойстик і кам�
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [stick] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
     expect(changed(p0, editor.point!), 'джойстик справжнім дотиком рухав точку').toHaveLength(1);
-    expect(cameraShift(cam0, cam1), 'камера зрушила, хоча палець на скані не рухався').toBeLessThan(1e-6);
+    expect(cameraTurn(cam0, cam1), 'камера повернулась, хоча палець на скані не рухався').toBeLessThan(1e-6);
+    expect(cameraPan(cam0, cam1), 'камера зсувається лише за точкою').toBeLessThanOrEqual(travelled(p0, editor.point!) + 1e-6);
   });
 
   test('два пальці лежать на скані (щипок), третій рухає джойстик: камера не зумиться й не зсувається', async ({ page }) => {
     await openRoomRuler(page);
-    await placeA(page);
+    const p0 = await placeA(page);
     const spot = await freeSpot(page);
     const cam0 = await camera(page);
     const cam = await page.evaluate(async (spot) => {
@@ -637,7 +648,8 @@ test.describe('Редактор точки (tester): джойстик і кам�
       k.fire('canvas', 'pointercancel', 84, spot.x + 40, spot.y);
       return [...v.position.toArray(), ...v.target.toArray()];
     }, spot);
-    expect(cameraShift(cam0, cam), 'камера зрушила від руху джойстика').toBeLessThan(1e-6);
+    expect(cameraTurn(cam0, cam), 'камера повернулась чи змінила масштаб від руху джойстика').toBeLessThan(1e-6);
+    expect(cameraPan(cam0, cam), 'камера зсувається лише за точкою').toBeLessThanOrEqual(travelled(p0, await editorPoint(page)) + 1e-6);
   });
 
   test('крутіння камери пальцем під час утримання джойстика: змінюється лише одна координата, точка не переставляється', async ({

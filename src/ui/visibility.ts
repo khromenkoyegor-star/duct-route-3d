@@ -81,6 +81,25 @@ export function freeAreaCenter(): ScreenPoint | null {
   return rect ? { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 } : null;
 }
 
+/** Ближче за це до краю вільної частини екрана точку, яку тягнуть, не підпускаємо (біля неї — стрілки осей), px. */
+const FOLLOW_MARGIN_PX = 48;
+
+/**
+ * Частина екрана, в якій тримаємо точку, поки її тягнуть джойстиком: вільна від панелей частина
+ * мінус запас. Якщо вільного місця мало — смуга посередині. null — вільного місця немає.
+ */
+export function followArea(): ScreenRect | null {
+  const free = freeAreaRect();
+  if (!free) return null;
+  const shrink = (from: number, to: number): [number, number] => {
+    const margin = Math.min(FOLLOW_MARGIN_PX, (to - from) / 2);
+    return [from + margin, to - margin];
+  };
+  const [left, right] = shrink(free.left, free.right);
+  const [top, bottom] = shrink(free.top, free.bottom);
+  return { left, right, top, bottom };
+}
+
 /**
  * Якщо точку закрила панель або вона за краєм екрана, камера повертається на місці так,
  * щоб точка опинилась посередині вільної від панелей частини екрана.

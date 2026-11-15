@@ -313,7 +313,6 @@ body {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .tool-button svg {
@@ -623,7 +622,6 @@ body {
   color: var(--tint);
   pointer-events: auto;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .title-panel--expanded .details-toggle svg {
@@ -668,7 +666,6 @@ body {
   font-weight: 600;
   pointer-events: auto;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .ruler-sub {
@@ -925,7 +922,6 @@ body {
   font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .confirm-button:active {
@@ -1291,7 +1287,6 @@ body {
   font-size: 19px;
   font-weight: 700;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .view-button:active {
@@ -1618,7 +1613,6 @@ body {
   font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .panel-button--primary {
@@ -1673,7 +1667,6 @@ body {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .route-row--selected {
@@ -1965,7 +1958,6 @@ body {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .duct-chip--on {
@@ -1999,7 +1991,6 @@ body {
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .segmented-option--on {
@@ -2119,7 +2110,6 @@ body {
   font: inherit;
   font-size: 17px;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .panel-button--danger-text {
@@ -2352,4 +2342,197 @@ body {
   .tool-button {
     padding: 0 12px;
   }
+}
+
+/* ───────── Масштаб сторінки Safari (етап 4.1) ───────── */
+
+/* Жести не дістаються браузеру на жодному елементі програми: сторінку не збільшити ні «щипком»,
+   ні подвійним дотиком (page-zoom.ts). Власне значення елемента надійніше за успадковане від body. */
+#app,
+#app * {
+  touch-action: none;
+}
+
+/* Прокручувані панелі й усе в них — лише вертикальна прокрутка одним пальцем. */
+#app .route-list,
+#app .route-list *,
+#app .route-panel,
+#app .route-panel *,
+#app .route-delete-panel,
+#app .route-delete-panel *,
+#app .duct-panel,
+#app .duct-panel * {
+  touch-action: pan-y;
+}
+
+/* Сторінка все ж збільшилась: жести дозволені, щоб її можна було зменшити двома пальцями. */
+html.page-zoomed #app,
+html.page-zoomed #app * {
+  touch-action: manipulation !important;
+  touch-action: pan-x pan-y pinch-zoom !important;
+}
+
+.zoom-banner {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--warning-label);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  transform-origin: 0 0;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  .zoom-banner {
+    color: #000000;
+  }
+}
+
+.zoom-banner p {
+  margin: 0;
+}
+
+.zoom-banner button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #000000;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ───────── Поворот 45° у редакторі точки (етап 4.1) ───────── */
+
+/* «45°» над «Підтвердити точку». */
+.point-actions {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.point-actions .confirm-button {
+  flex: none;
+}
+
+.diag-button {
+  align-self: flex-start;
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: var(--solid-fill);
+  color: var(--tint);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.diag-button--on {
+  border-color: var(--tint);
+  background: var(--tint-soft);
+}
+
+.diag-button:active {
+  opacity: 0.6;
+}
+
+/* Вибір другої осі: підпис і чотири варіанти в один рядок. */
+.diag-picker {
+  display: grid;
+  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* iPhone горизонтально: панель вузька — підпис окремим рядком, чотири варіанти під ним. */
+@media (max-height: 500px) {
+  .diag-picker {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px 6px;
+    margin-bottom: 8px;
+  }
+
+  .diag-picker .diag-picker-caption {
+    grid-column: 1 / -1;
+    font-size: 13px;
+  }
+}
+
+.diag-picker-caption {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.diag-option {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--solid-fill);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.diag-option--x {
+  color: var(--axis-x);
+}
+
+.diag-option--y {
+  color: var(--axis-y);
+}
+
+.diag-option--z {
+  color: var(--axis-z);
+}
+
+.diag-option:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.diag-button:focus-visible,
+.diag-option:focus-visible {
+  outline: 3px solid var(--tint);
+  outline-offset: 2px;
+}
+
+/* ───────── Кнопка «Орто» біля X / Y / Z (етап 4.1) ───────── */
+
+.view-button--ortho {
+  width: auto;
+  min-width: 58px;
+  padding: 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label);
+}
+
+.view-button--ortho.view-button--active {
+  color: var(--tint);
 }

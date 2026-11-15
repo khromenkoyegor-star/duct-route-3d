@@ -14,6 +14,11 @@
  * і тягнеться лише по одній осі (core/route.ts → stepAlongSegment). Вісь вибирає перший рух;
  * повернувши точку на початок, вісь можна змінити. Назад по попередньому відрізку — не можна.
  * Замість «Зсув» — довжина відрізка; відрізок нульової довжини не підтверджується.
+ *
+ * Поворот 45° (етап 4.1): точку тягнуть по основній осі, потім кнопкою «45°» вибирають другу вісь
+ * і бік зміщення — відрізок стає діагональним (зміщення по обох осях однакові), і той самий джойстик
+ * чи повзунок тягне точку вздовж діагоналі. Ще раз «45°» — знову прямо. Між сусідніми відрізками —
+ * лише 45° або 90°: у заборонений бік точка не рухається.
  */
 import {
   createStickController,
@@ -24,10 +29,21 @@ import {
   sliderStep,
   type Vec2,
 } from '../core/nudge';
-import { canAppendNode, distance, lockedAxis, type SegmentDir, stepAlongSegment } from '../core/route';
+import {
+  canAppendNode,
+  type DiagonalChoice,
+  diagonalOptions,
+  distance,
+  headingUnit,
+  lockedAxis,
+  type P3,
+  stepAlongSegment,
+  turnAllowed,
+} from '../core/route';
 import { formatMm, mmToM, mToMm } from '../core/units';
 import type { Viewer } from '../scene/viewer';
 import { createStick } from './joystick';
+import { followArea, type ScreenRect } from './visibility';
 
 export interface PointEditorState {
   active: boolean;
@@ -40,8 +56,11 @@ export interface PointEditorState {
   axis: NudgeAxis | null;
   /** Чи точку вже підсували після постановки. */
   moved: boolean;
-  /** Режим «відрізок від точки»: початок, вісь відрізка (null — точка ще на початку), довжина в мм. */
-  segment: { anchor: PointM; axis: NudgeAxis | null; lengthMm: number } | null;
+  /**
+   * Режим «відрізок від точки»: початок, основна вісь відрізка (null — точка ще на початку),
+   * довжина в мм і друга вісь у режимі 45° (null — відрізок прямий).
+   */
+  segment: { anchor: PointM; axis: NudgeAxis | null; lengthMm: number; diagonal: DiagonalChoice | null } | null;
   /** Чи можна зараз підтвердити точку (відрізок нульової довжини — не можна). */
   canConfirm: boolean;
 }
@@ -51,12 +70,15 @@ export function closedEditorState(): PointEditorState {
   return { active: false, label: null, point: null, origin: null, axis: null, moved: false, segment: null, canConfirm: false };
 }
 
-/** Наступна точка траси: тягнеться від попереднього вузла лише по одній осі. */
+/** Наступна точка траси: тягнеться від попереднього вузла по осі або під 45°. */
 export interface SegmentOptions {
   /** Попередній вузол (м сцени). */
   anchor: PointM;
-  /** Напрямок попереднього відрізка — назад по ньому траса не йде (null — це перший відрізок). */
-  back: SegmentDir | null;
+  /**
+   * Напрямок попереднього відрізка (одиничний вектор; null — це перший відрізок):
+   * новий відрізок може йти лише прямо, під 45° або 90° до нього.
+   */
+  previous: P3 | null;
 }
 
 export interface EditOptions {
@@ -162,8 +184,12 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   let customTitle: string | null = null;
   let axis: NudgeAxis | null = null;
   let segment: SegmentOptions | null = null;
-  /** Тягнуть назад по попередньому відрізку — точка стоїть, підказуємо чому. */
-  let blockedBack = false;
+  /** Тягнуть у заборонений бік (назад чи під гострим кутом) — точка стоїть, підказуємо чому. */
+  let blockedBack: 'back' | 'turn' | false = false;
+  /** Режим 45°: основна вісь і вибрана друга вісь з боком (null — відрізок прямий). */
+  let diagonal: { main: NudgeAxis; choice: DiagonalChoice } | null = null;
+  /** Чи відкрито вибір другої осі для 45°. */
+  let pickerOpen = false;
   /** До цього часу точка «стоїть» на початку відрізка (див. ANCHOR_DETENT_MS). */
   let detentUntil = 0;
   /** Пояснення біля джойстика (notice) і таймер, що його прибирає. */
@@ -176,10 +202,19 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   };
   const controller = createStickController();
 
-  /** Вісь, по якій уже йде відрізок (null — не режим відрізка або точка на початку). */
-  const segmentAxis = (): NudgeAxis | null => (segment && point ? lockedAxis(segment.anchor, point) : null);
+  /** Основна вісь, по якій уже йде відрізок (null — не режим відрізка або точка на початку). */
+  const segmentAxis = (): NudgeAxis | null => {
+    if (!segment || !point) return null;
+    return diagonal ? diagonal.main : lockedAxis(segment.anchor, point);
+  };
   const segmentLengthMm = () => (segment && point ? mToMm(distance(segment.anchor, point)) : 0);
-  const canConfirm = () => !!point && (!segment || (segmentAxis() !== null && canAppendNode(segment.anchor, point)));
+  const canConfirm = () =>
+    !!point && (!segment || (segmentAxis() !== null && canAppendNode(segment.anchor, point, segment.previous)));
+  /** Точка повернулась на початок відрізка — режим 45° і вибір другої осі скидаються. */
+  const resetDiagonal = () => {
+    diagonal = null;
+    pickerOpen = false;
+  };
 
   /** Зсунути точку на крок; true — точка змінилась. */
   const apply = (stepAxis: NudgeAxis, deltaMm: number, now: number): boolean => {
@@ -189,12 +224,23 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       return true;
     }
     if (now < detentUntil) return false;
-    const next = stepAlongSegment(segment.anchor, point, stepAxis, mmToM(deltaMm), segment.back);
+    const choice = diagonal?.choice ?? null;
+    const next = stepAlongSegment(segment.anchor, point, stepAxis, mmToM(deltaMm), segment.previous, choice);
     const atAnchor = samePoint(next, segment.anchor);
-    blockedBack =
-      atAnchor && !!segment.back && segment.back.axis === stepAxis && Math.sign(deltaMm) !== segment.back.sign;
+    // Точка стоїть на початку, бо в цей бік поворот заборонений (назад, 135°, 60°…)?
+    blockedBack = false;
+    if (atAnchor && segment.previous && deltaMm !== 0) {
+      const wanted = headingUnit([{ axis: stepAxis, sign: deltaMm > 0 ? 1 : -1 }, ...(choice ? [choice] : [])]);
+      if (!turnAllowed(segment.previous, wanted)) {
+        const dot = segment.previous.x * wanted.x + segment.previous.y * wanted.y + segment.previous.z * wanted.z;
+        blockedBack = dot < -0.99 ? 'back' : 'turn';
+      }
+    }
     if (samePoint(next, point)) return false;
-    if (atAnchor) detentUntil = now + ANCHOR_DETENT_MS;
+    if (atAnchor) {
+      detentUntil = now + ANCHOR_DETENT_MS;
+      resetDiagonal();
+    }
     point = next;
     return true;
   };
@@ -204,11 +250,14 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   // якщо браузер малює рідко, точка все одно проходить стільки, скільки тримали.
   let frame = 0;
   let lastTime = 0;
+  let followRect: ScreenRect | null = null;
   const integrate = (now: number) => {
     const dt = lastTime ? (now - lastTime) / MS_PER_SECOND : 0;
     lastTime = now;
     if (!point) return;
     let changed = false;
+    // Де точка на екрані до цього кроку: далі від видимої частини екрана, ніж зараз, вона не піде.
+    const screenBefore = followRect ? viewer.projectPoint(point) : null;
     const locked = segmentAxis();
     // Відрізок уже йде по Y — джойстик (X/Z) не працює; по X чи Z — не працює повзунок.
     const stickUsable = locked !== 'Y';
@@ -231,6 +280,15 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     }
     if (changed) {
       clearNotice();
+      // Камера їде за точкою: до середини екрана точка рухається вільно, від нього — камера зсувається.
+      if (followRect && screenBefore?.visible) {
+        viewer.followPoint(point, {
+          left: Math.min(followRect.left, screenBefore.x),
+          right: Math.max(followRect.right, screenBefore.x),
+          top: Math.min(followRect.top, screenBefore.y),
+          bottom: Math.max(followRect.bottom, screenBefore.y),
+        });
+      }
       handlers?.onChange(point);
       viewer.requestRender();
     }
@@ -243,6 +301,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   };
   const startLoop = () => {
     if (frame) return;
+    // Де тримати точку на екрані, поки її тягнуть (панелі під час утримання не рухаються).
+    followRect = followArea();
     lastTime = performance.now();
     frame = requestAnimationFrame(loop);
   };
@@ -304,8 +364,99 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       else render();
     },
   });
-  controls.append(stick.element, slider.element, confirm);
-  element.append(readout, controls);
+  // Кнопка «45°» над «Підтвердити точку» (лише для відрізків траси) і вибір другої осі під координатами.
+  const diagButton = document.createElement('button');
+  diagButton.type = 'button';
+  diagButton.className = 'diag-button';
+  diagButton.dataset.testid = 'segment-45';
+  diagButton.textContent = '45°';
+  diagButton.setAttribute('aria-pressed', 'false');
+  diagButton.hidden = true;
+  const actions = document.createElement('div');
+  actions.className = 'point-actions';
+  actions.append(diagButton, confirm);
+  const picker = document.createElement('div');
+  picker.className = 'diag-picker';
+  picker.dataset.testid = 'segment-45-picker';
+  picker.setAttribute('role', 'group');
+  picker.setAttribute('aria-label', 'Куди зміщення під 45°');
+  picker.hidden = true;
+  controls.append(stick.element, slider.element, actions);
+  element.append(readout, picker, controls);
+
+  /** Точку пересунуто кнопкою (не джойстиком): повідомити інструмент і перевірити, чи її видно. */
+  const moved = () => {
+    if (!point) return;
+    clearNotice();
+    handlers?.onChange(point);
+    viewer.requestRender();
+    render();
+    handlers?.onSettle?.(point);
+  };
+
+  diagButton.addEventListener('click', () => {
+    if (!segment || !point) return;
+    const main = segmentAxis();
+    if (diagonal) {
+      // Ще раз «45°» — відрізок знову прямий: лишається хід по основній осі.
+      const key = AXIS_KEY[diagonal.main];
+      point = { ...segment.anchor, [key]: point[key] };
+      resetDiagonal();
+      moved();
+      return;
+    }
+    if (!main) {
+      pickerOpen = false;
+      showNotice('Спершу потягніть точку по основній осі, потім натисніть «45°»', true);
+      return;
+    }
+    pickerOpen = !pickerOpen;
+    clearNotice();
+    render();
+    // Панель стала вищою (рядок вибору) — точка не має опинитись під нею: зсуваємо камеру, без повороту.
+    const area = pickerOpen ? followArea() : null;
+    if (area) viewer.followPoint(point, area);
+  });
+
+  /** Вибрали другу вісь: відрізок стає діагональним — зміщення по ній дорівнює ходу по основній. */
+  const chooseDiagonal = (main: NudgeAxis, choice: DiagonalChoice) => {
+    if (!segment || !point) return;
+    const next = stepAlongSegment(segment.anchor, point, main, 0, segment.previous, choice);
+    if (samePoint(next, segment.anchor)) return;
+    diagonal = { main, choice };
+    pickerOpen = false;
+    point = next;
+    moved();
+  };
+
+  const optionLabel = (choice: DiagonalChoice) =>
+    choice.axis === 'Y' ? (choice.sign > 0 ? 'Y вгору' : 'Y вниз') : `${choice.axis}${choice.sign > 0 ? '+' : '−'}`;
+
+  /** Перемалювати вибір другої осі (чотири варіанти: дві інші осі × два боки). */
+  const renderPicker = (main: NudgeAxis | null) => {
+    const open = pickerOpen && !!segment && !!point && !!main && !diagonal;
+    picker.hidden = !open;
+    if (!open || !segment || !point || !main) {
+      picker.replaceChildren();
+      return;
+    }
+    const sign = point[AXIS_KEY[main]] >= segment.anchor[AXIS_KEY[main]] ? 1 : -1;
+    const caption = document.createElement('span');
+    caption.className = 'diag-picker-caption';
+    caption.textContent = '45° у бік:';
+    const buttons = diagonalOptions(main, sign, segment.previous).map((option) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `diag-option diag-option--${option.axis.toLowerCase()}`;
+      button.dataset.testid = `segment-45-${option.axis.toLowerCase()}-${option.sign > 0 ? 'plus' : 'minus'}`;
+      button.textContent = optionLabel(option);
+      button.disabled = !option.allowed;
+      if (!option.allowed) button.title = 'Такий поворот після попереднього відрізка не можна';
+      button.addEventListener('click', () => chooseDiagonal(main, { axis: option.axis, sign: option.sign }));
+      return button;
+    });
+    picker.replaceChildren(caption, ...buttons);
+  };
 
   // Стрілки осей біля точки.
   const overlay = document.createElement('div');
@@ -342,6 +493,7 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     if (!base.visible) return;
     const longest = Math.max(...AXES.map((a) => Math.hypot(screen[a].x, screen[a].y)));
     const locked = segmentAxis();
+    const second = diagonal?.choice ?? null;
     for (const arrow of arrows) {
       let dir: Vec2 = screen[arrow.name];
       // Відрізок уже йде по цій осі: стрілка — в бік руху, геть від початку відрізка
@@ -349,6 +501,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       if (segment && locked === arrow.name && point[AXIS_KEY[locked]] < segment.anchor[AXIS_KEY[locked]]) {
         dir = { x: -dir.x, y: -dir.y };
       }
+      // Режим 45°: стрілка другої осі — у вибраний бік.
+      if (second && second.axis === arrow.name && second.sign < 0) dir = { x: -dir.x, y: -dir.y };
       const len = Math.hypot(dir.x, dir.y);
       // Вісь, що «дивиться в камеру», не малюємо — по ній джойстик і не рухає.
       const visible = len > 0 && len >= longest * 0.15;
@@ -372,8 +526,9 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       );
       arrow.text.setAttribute('x', String(tipX + ux * 16));
       arrow.text.setAttribute('y', String(tipY + uy * 16 + 5));
-      arrow.group.classList.toggle('axis-arrow--active', shown === arrow.name);
-      arrow.group.classList.toggle('axis-arrow--dim', shown !== null && shown !== arrow.name);
+      const active = shown === arrow.name || second?.axis === arrow.name;
+      arrow.group.classList.toggle('axis-arrow--active', active);
+      arrow.group.classList.toggle('axis-arrow--dim', shown !== null && !active);
     }
   };
   const stopFrames = viewer.onFrame(drawArrows);
@@ -392,7 +547,13 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       control.classList.toggle('stick--off', off);
       control.setAttribute('aria-disabled', String(off));
     }
-    shift.classList.toggle('point-shift--warning', noticeText !== null || (segment !== null && blockedBack));
+    shift.classList.toggle('point-shift--warning', noticeText !== null || (segment !== null && blockedBack !== false));
+    // «45°» — лише для відрізків траси; підсвічена, коли відрізок діагональний.
+    diagButton.hidden = !segment;
+    diagButton.setAttribute('aria-pressed', String(!!diagonal));
+    diagButton.classList.toggle('diag-button--on', !!diagonal);
+    diagButton.setAttribute('aria-label', diagonal ? 'Поворот 45° увімкнено. Натисніть, щоб відрізок став прямим' : 'Поворот під 45°');
+    renderPicker(locked);
     if (noticeText) {
       shift.textContent = noticeText;
       drawArrows();
@@ -416,13 +577,18 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     drawArrows();
   }
 
-  /** «Відрізок: X +1 250 мм» або підказка, поки точка на початку. */
+  /** «Відрізок: X +1 250 мм», «Відрізок 45°: X +1 000 · Z +1 000 = 1 414,2 мм» або підказка на початку. */
   function segmentText(locked: NudgeAxis | null): string {
-    if (blockedBack) return 'Назад по попередньому відрізку не можна';
+    if (blockedBack === 'back') return 'Назад по попередньому відрізку не можна';
+    if (blockedBack === 'turn') return 'Такий поворот не можна: лише 45° або 90°';
     if (!segment || !point || !locked) return 'Тягніть джойстиком (X, Z) чи повзунком (Y)';
-    const key = AXIS_KEY[locked];
-    const offset = mToMm(point[key] - segment.anchor[key]);
-    const text = `Відрізок: ${locked} ${offset > 0 ? '+' : '−'}${formatMm(Math.abs(offset))}`;
+    const part = (a: NudgeAxis) => {
+      const offset = mToMm(point![AXIS_KEY[a]] - segment!.anchor[AXIS_KEY[a]]);
+      return `${a} ${offset > 0 ? '+' : '−'}${formatMm(Math.abs(offset)).replace(/\s*мм$/, '')}`;
+    };
+    const text = diagonal
+      ? `Відрізок 45°: ${part(locked)} · ${part(diagonal.choice.axis)} = ${formatMm(segmentLengthMm())}`
+      : `Відрізок: ${part(locked)} мм`;
     // Підпис округлено до 0,1 мм — пояснюємо, чому «Підтвердити» ще неактивна.
     return canConfirm() ? text : `${text} — закороткий`;
   }
@@ -466,7 +632,14 @@ export function createPointEditor(viewer: Viewer): PointEditor {
         axis,
         moved: !!point && !!origin && (point.x !== origin.x || point.y !== origin.y || point.z !== origin.z),
         segment:
-          segment && point ? { anchor: { ...segment.anchor }, axis: segmentAxis(), lengthMm: segmentLengthMm() } : null,
+          segment && point
+            ? {
+                anchor: { ...segment.anchor },
+                axis: segmentAxis(),
+                lengthMm: segmentLengthMm(),
+                diagonal: diagonal ? { ...diagonal.choice } : null,
+              }
+            : null,
         canConfirm: canConfirm(),
       };
     },
@@ -479,7 +652,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       stopLoop(false);
       lastTime = 0;
       handlers = owner;
-      segment = options.segment ? { anchor: { ...options.segment.anchor }, back: options.segment.back } : null;
+      segment = options.segment ? { anchor: { ...options.segment.anchor }, previous: options.segment.previous } : null;
+      resetDiagonal();
       // У режимі відрізка точка завжди стартує в попередньому вузлі.
       point = segment ? { ...segment.anchor } : { ...next };
       origin = { ...point };
@@ -502,6 +676,7 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       label = null;
       customTitle = null;
       segment = null;
+      resetDiagonal();
       handlers = null;
       clearNotice();
       element.hidden = true;

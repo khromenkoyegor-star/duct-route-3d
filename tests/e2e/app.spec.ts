@@ -128,7 +128,7 @@ test.describe('Етап 0: порожня 3D-сцена', () => {
     await expect(page.locator('[data-testid="title"], [data-testid="legend"]')).toHaveCount(0);
     const viewport = page.viewportSize()!;
     const boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
-    for (const id of ['view-x', 'view-y', 'view-z', 'open-scan', 'show-all', 'ruler', 'route', 'route-delete', 'duct']) {
+    for (const id of ['view-x', 'view-y', 'view-z', 'view-ortho', 'open-scan', 'show-all', 'ruler', 'route', 'route-delete', 'duct']) {
       const box = (await page.getByTestId(id).boundingBox())!;
       boxes[id] = box;
       expect(box.width, id).toBeGreaterThanOrEqual(44);
@@ -139,7 +139,7 @@ test.describe('Етап 0: порожня 3D-сцена', () => {
       expect(box.y + box.height, id).toBeLessThanOrEqual(viewport.height);
     }
     // Кнопки видів — у верхній частині екрана.
-    for (const id of ['view-x', 'view-y', 'view-z']) expect(boxes[id]!.y, id).toBeLessThan(viewport.height / 4);
+    for (const id of ['view-x', 'view-y', 'view-z', 'view-ortho']) expect(boxes[id]!.y, id).toBeLessThan(viewport.height / 4);
     const ids = Object.keys(boxes);
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
