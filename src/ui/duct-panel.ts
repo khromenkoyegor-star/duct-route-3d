@@ -21,7 +21,7 @@ import {
   withoutTransition,
   withTransition,
 } from '../core/duct';
-import { distance, type Route, segmentDirection } from '../core/route';
+import { distance, NODE_TOLERANCE_MM, type Route, segmentHeading } from '../core/route';
 import { formatMm } from '../core/units';
 
 export type ViewMode = 'route' | 'duct' | 'both';
@@ -327,7 +327,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     for (let i = 0; i < count; i++) {
       const a = r.nodes[i]!;
       const b = r.nodes[i + 1]!;
-      const dir = segmentDirection(a, b);
+      const heading = segmentHeading(a, b, NODE_TOLERANCE_MM);
       const len = distance(a, b);
       const item = el('li', '');
       const row = button('route-row duct-segment', '', `duct-segment-${i}`, () =>
@@ -337,12 +337,18 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       row.setAttribute('aria-pressed', String(on));
       row.classList.toggle('duct-segment--selected', on);
       const problem = problemOf.get(i);
-      row.classList.toggle('duct-segment--problem', !!problem);
-      const dirText = dir ? `${dir.axis} ${dir.sign > 0 ? '+' : '−'}${mm(len)}` : mm(len);
+      // Поворот на початку цього відрізка — не в площині сторін прямокутної труби.
+      const obliqueTurn = layout.oblique.includes(i);
+      row.classList.toggle('duct-segment--problem', !!problem || obliqueTurn);
+      // «X +2 500 мм» — уздовж осі; «45° X+ Z− · 1 414 мм» — діагональ.
+      const signs = (heading?.parts ?? []).map((part) => `${part.axis}${part.sign > 0 ? '+' : '−'}`);
+      const dirText =
+        signs.length === 1 ? `${signs[0]!.slice(0, 1)} ${signs[0]!.slice(1)}${mm(len)}` : signs.length === 2 ? `45° ${signs.join(' ')} · ${mm(len)}` : mm(len);
       row.append(el('span', 'route-row-name', `${i + 1} · ${dirText}`));
       const t = transitionOn.get(i);
       let meta = t ? `перехід ${formatSection(i === 0 ? spec.section : sections[i - 1]!)} → ${formatSection(t.to)}` : formatSection(sections[i]!);
       if (problem) meta = `замало: треба ${mm(problem.needMm)}, є ${mm(problem.haveMm)}`;
+      else if (obliqueTurn) meta = 'поворот не в площині сторін';
       row.append(el('span', 'route-row-meta', meta));
       item.append(row);
       // Редактор переходу — одразу під вибраним рядком.
@@ -444,11 +450,21 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       }
       out.push(list);
     }
-    const problems = ductLayout(r.nodes, spec).problems;
-    if (problems.length > 0) {
+    const layout = ductLayout(r.nodes, spec);
+    const problems = layout.problems;
+    if (problems.length > 0 || layout.oblique.length > 0) {
       const box = el('div', 'duct-problems');
       box.dataset.testid = 'duct-problems';
       box.setAttribute('role', 'status');
+      for (const node of layout.oblique) {
+        box.append(
+          el(
+            'p',
+            '',
+            `Поворот між відрізками ${node} і ${node + 1}: прямокутна труба повертає не в площині своїх сторін — стандартної деталі для цього немає`,
+          ),
+        );
+      }
       for (const p of problems) {
         box.append(
           el(
@@ -480,11 +496,12 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       const on = selection?.routeId === r.id;
       chip.setAttribute('aria-pressed', String(on));
       chip.classList.toggle('duct-chip--on', on);
-      const problems = r.duct ? ductLayout(r.nodes, r.duct).problems.length : 0;
+      const chipLayout = r.duct ? ductLayout(r.nodes, r.duct) : null;
+      const problems = chipLayout ? chipLayout.problems.length + chipLayout.oblique.length : 0;
       chip.append(el('span', 'duct-chip-size', r.duct ? formatSection(r.duct.section) : 'без труби'));
       if (problems > 0) {
         const badge = el('span', 'duct-chip-badge', '!');
-        badge.setAttribute('aria-label', 'є закороткі відрізки');
+        badge.setAttribute('aria-label', 'є відрізки, де деталі не вміщаються');
         chip.append(badge);
       }
       chips.append(chip);
