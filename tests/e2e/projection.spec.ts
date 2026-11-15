@@ -157,6 +157,29 @@ test.describe('Ортогональна проекція', () => {
     expect(Math.abs((await screenLength(page, ...onWall)) / zoomed - 1)).toBeLessThan(0.02);
   });
 
+  test('зсередини кімнати: в «Орто» видно те саме, що з перспективою — те, що за камерою, у кадр не потрапляє', async ({ page }) => {
+    // Камера в кімнаті (Z від −1,5 до 1,5 м) дивиться на стіну Z = −1,5; стіна Z = +1,5 — за спиною.
+    await openRoom(page, { x: 0.3, y: 1.2, z: 1.2 }, { x: 0.3, y: 1.2, z: 0 });
+    const behind = { x: 0.3, y: 1.2, z: 1.45 };
+    const ahead = { x: 0.3, y: 1.2, z: -1.4 };
+    expect((await project(page, behind)).visible).toBe(false);
+    await toggleOrtho(page, 'ortho');
+    expect((await project(page, behind)).visible, 'точка за камерою').toBe(false);
+    expect((await project(page, ahead)).visible, 'точка попереду').toBe(true);
+    // Дотик по центру кадру влучає в стіну попереду, а не в ту, що за спиною.
+    const vp = page.viewportSize()!;
+    const hit = await page.evaluate((c) => window.__trasa!.viewer.raycastScan(c.x, c.y), { x: vp.width / 2, y: vp.height / 2 });
+    expect(hit).not.toBeNull();
+    expect(hit!.z).toBeCloseTo(-1.5, 3);
+    // Лінія траси, що йде за камеру, обрізається так само, як з перспективою.
+    const path = await page.evaluate(
+      ([a, b]) => window.__trasa!.viewer.projectPath([a!, b!]),
+      [ahead, behind] as const,
+    );
+    expect(path.nodes.map((n) => n.visible)).toEqual([true, false]);
+    expect(path.segments).toHaveLength(1);
+  });
+
   test('перемикання під час побудови траси: точка, яку тягнуть, лишається того ж розміру й на місці', async ({ page }) => {
     await openRoom(page, { x: 2.5, y: 4, z: 9 }, { x: 0, y: 0.8, z: 0 });
     await page.getByTestId('route').click();

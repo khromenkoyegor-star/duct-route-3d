@@ -188,9 +188,9 @@ export function createViewer(container: HTMLElement): Viewer {
   // «Показати все», види X/Y/Z. Ортогональну щоразу виводимо з неї: той самий напрямок погляду,
   // а видима висота кадру — як у перспективної на відстані до цілі. Тож зум (відстань до цілі)
   // працює в обох проекціях однаково, а перемикання не змінює розмір того, на що дивляться.
-  const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0.01, 2000);
-  /** Щонайменше на стільки ортогональна камера відсунута назад уздовж погляду: не обрізає те, що позаду логічної камери. */
-  const ORTHO_BACK_M = 200;
+  // Стоїть там само, де логічна, з тими самими межами по глибині: видно те саме, що й з перспективою
+  // (зсередини кімнати стіна за спиною не закриває вид), лише без перспективного спотворення.
+  const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
   let projection: Projection = 'perspective';
   let lastWidth = 0;
   let lastHeight = 0;
@@ -239,11 +239,10 @@ export function createViewer(container: HTMLElement): Viewer {
     orthoCamera.right = halfW;
     orthoCamera.top = halfH;
     orthoCamera.bottom = -halfH;
-    // Назад уздовж погляду (вісь +Z камери): усе, що позаду логічної камери, теж видно.
-    const backOff = Math.max(ORTHO_BACK_M, camera.far / 4);
-    orthoCamera.position.copy(camera.position).addScaledVector(new Vector3().setFromMatrixColumn(camera.matrixWorld, 2), backOff);
+    orthoCamera.position.copy(camera.position);
     orthoCamera.quaternion.copy(camera.quaternion);
-    orthoCamera.far = backOff + Math.max(camera.far, 1000);
+    orthoCamera.near = camera.near;
+    orthoCamera.far = camera.far;
     orthoCamera.updateProjectionMatrix();
     orthoCamera.updateMatrixWorld();
     return orthoCamera;
