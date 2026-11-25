@@ -26,6 +26,7 @@ import {
   diagonalStep,
   joystickLayout,
   movePoint,
+  type HorizontalAxis,
   type NudgeAxis,
   type PointM,
   sliderStep,
@@ -120,6 +121,10 @@ export interface PointEditorHandlers {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+/** Стрілка «вправо» на варіанті вибору 45° (повертається так, як діагональ піде на екрані). */
+const DIAG_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 8h10M8.5 4l4 4-4 4" fill="none" ' +
+  'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ARROW_PX = 64;
 const ARROW_GAP_PX = 16;
 /** Мілісекунди в секунді (час кадрів) — не плутати з мм ↔ м, ті лише в units.ts. */
@@ -192,6 +197,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   let diagonal: { main: NudgeAxis; choice: DiagonalChoice } | null = null;
   /** Чи відкрито вибір другої осі для 45°. */
   let pickerOpen = false;
+  /** Стрілки на варіантах вибору 45° (повертаються разом з камерою). */
+  let pickerIcons: Array<{ icon: HTMLElement; choice: DiagonalChoice }> = [];
   /** До цього часу точка «стоїть» на початку відрізка (див. ANCHOR_DETENT_MS). */
   let detentUntil = 0;
   /** Пояснення біля джойстика (notice) і таймер, що його прибирає. */
@@ -219,14 +226,30 @@ export function createPointEditor(viewer: Viewer): PointEditor {
   };
 
   /**
-   * Режим 45° з основною віссю X чи Z: куди на екрані рухається точка, коли основна координата
-   * зростає (сума стрілок двох осей). null — не режим 45° (або основна вісь Y: тоді веде повзунок).
+   * Режим 45°: куди на екрані рухається точка, коли основна координата зростає (сума стрілок двох осей).
+   * null — не режим 45°.
    */
   const diagonalOnScreen = (screen: Record<NudgeAxis, Vec2>): Vec2 | null => {
-    if (!diagonal || diagonal.main === 'Y' || !segment || !point) return null;
+    if (!diagonal || !segment || !point) return null;
+    return diagonalScreenDirection(screen[diagonal.main], screen[diagonal.choice.axis], diagonalSide(), diagonal.choice.sign);
+  };
+
+  /**
+   * Чи діють зараз джойстик (X, Z) і повзунок (Y). Прямий відрізок: по Y — лише повзунок, по X чи Z —
+   * лише джойстик. Діагональ 45°: джойстик веде вздовж неї завжди (у ній завжди є X чи Z), повзунок —
+   * якщо в ній є Y (підйом чи опуск); тоді однаково, з якої осі почали.
+   */
+  const controlsUsable = (): { stick: boolean; slider: boolean } => {
+    if (diagonal) return { stick: true, slider: diagonal.main === 'Y' || diagonal.choice.axis === 'Y' };
+    const locked = segmentAxis();
+    return { stick: locked !== 'Y', slider: locked === null || locked === 'Y' };
+  };
+
+  /** Режим 45°: з якого боку від початку відрізка точка по основній осі (1 чи −1). */
+  const diagonalSide = (): 1 | -1 => {
+    if (!diagonal || !segment || !point) return 1;
     const key = AXIS_KEY[diagonal.main];
-    const side = point[key] >= segment.anchor[key] ? 1 : -1;
-    return diagonalScreenDirection(screen[diagonal.main], screen[diagonal.choice.axis], side, diagonal.choice.sign);
+    return point[key] >= segment.anchor[key] ? 1 : -1;
   };
 
   /** Зсунути точку на крок; true — точка змінилась. */
@@ -272,10 +295,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     // Де точка на екрані до цього кроку: далі від видимої частини екрана, ніж зараз, вона не піде.
     const screenBefore = followRect ? viewer.projectPoint(point) : null;
     const locked = segmentAxis();
-    // Відрізок уже йде по Y — джойстик (X/Z) не працює; по X чи Z — не працює повзунок.
-    const stickUsable = locked !== 'Y';
-    const sliderUsable = locked === null || locked === 'Y';
-    if (stick.active && stickUsable) {
+    const usable = controlsUsable();
+    if (stick.active && usable.stick) {
       const screen = viewer.screenAxes(point);
       const along = diagonalOnScreen(screen);
       if (along && diagonal) {
@@ -291,13 +312,20 @@ export function createPointEditor(viewer: Viewer): PointEditor {
         stick.setKnobAxis(axis);
         if (step) changed = apply(step.axis, step.deltaMm, now);
       }
-    } else if (slider.active && sliderUsable) {
+    } else if (slider.active && usable.slider) {
       // Одночасно — лише одна вісь: джойстик має перевагу, повзунок — коли джойстик вільний.
       const step = sliderStep(-slider.value.y, dt);
       if (step) {
-        axis = 'Y';
         slider.setKnobAxis('Y');
-        changed = apply(step.axis, step.deltaMm, now);
+        if (diagonal && diagonal.main !== 'Y') {
+          // Діагональ з Y як другою віссю: повзунок угору — точка вгору вздовж діагоналі
+          // (висота змінюється рівно на стільки ж, на скільки хід по основній осі).
+          axis = diagonal.main;
+          changed = apply(diagonal.main, step.deltaMm * diagonal.choice.sign * diagonalSide(), now);
+        } else {
+          axis = 'Y';
+          changed = apply(step.axis, step.deltaMm, now);
+        }
       }
     }
     if (changed) {
@@ -348,7 +376,9 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     testid: 'stick-xz',
     onActiveChange(isActive) {
       if (isActive) {
-        if (segmentAxis() === 'Y') showNotice('Джойстик зараз не діє: відрізок іде по Y. Щоб змінити вісь, поверніть точку на початок');
+        if (!controlsUsable().stick) {
+          showNotice('Джойстик зараз не діє: відрізок іде по Y. Щоб змінити вісь, поверніть точку на початок');
+        }
         startLoop();
         return;
       }
@@ -371,14 +401,19 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     onActiveChange(isActive) {
       if (isActive) {
         const locked = segmentAxis();
-        if (locked === 'X' || locked === 'Z') {
-          showNotice(`Повзунок зараз не діє: відрізок іде по ${locked}. Щоб змінити вісь, поверніть точку на початок`);
+        if (!controlsUsable().slider) {
+          showNotice(
+            diagonal
+              ? 'Повзунок зараз не діє: відрізок 45° у горизонталі — тягніть джойстиком уздовж помаранчевої стрілки'
+              : `Повзунок зараз не діє: відрізок іде по ${locked}. Щоб змінити вісь, поверніть точку на початок`,
+          );
         }
         startLoop();
         return;
       }
       integrate(performance.now());
-      if (axis === 'Y') axis = null;
+      // Відпустили повзунок: його рух закінчився (у режимі 45° вісь — основна, а не Y).
+      if (axis === 'Y' || (diagonal && !stick.active)) axis = null;
       blockedBack = false;
       detentUntil = 0;
       slider.setKnobAxis(null);
@@ -466,18 +501,54 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     const caption = document.createElement('span');
     caption.className = 'diag-picker-caption';
     caption.textContent = '45° у бік:';
-    const buttons = diagonalOptions(main, sign, segment.previous).map((option) => {
+    // Порядок сталий: спершу горизонтальні варіанти, «Y вгору» і «Y вниз» — завжди в кінці.
+    const options = diagonalOptions(main, sign, segment.previous).sort(
+      (a, b) => Number(a.axis === 'Y') - Number(b.axis === 'Y'),
+    );
+    pickerIcons = [];
+    const buttons = options.map((option) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `diag-option diag-option--${option.axis.toLowerCase()}`;
       button.dataset.testid = `segment-45-${option.axis.toLowerCase()}-${option.sign > 0 ? 'plus' : 'minus'}`;
-      button.textContent = optionLabel(option);
-      button.disabled = !option.allowed;
-      if (!option.allowed) button.title = 'Такий поворот після попереднього відрізка не можна';
-      button.addEventListener('click', () => chooseDiagonal(main, { axis: option.axis, sign: option.sign }));
+      // Маленька стрілка — куди піде діагональ на екрані з цим варіантом (повертається з камерою).
+      const icon = document.createElement('span');
+      icon.className = 'diag-option-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = DIAG_ICON;
+      const text = document.createElement('span');
+      text.textContent = optionLabel(option);
+      button.append(icon, text);
+      button.setAttribute('aria-label', `45° у бік ${optionLabel(option)}`);
+      // Недоступний варіант — сірий, але натискається: пояснює, чому не можна (наведення курсору на iPad
+      // з пальцем немає, тож пояснення лише в підказці-«title» не видно).
+      if (!option.allowed) button.setAttribute('aria-disabled', 'true');
+      button.addEventListener('click', () => {
+        if (!option.allowed) {
+          showNotice('Такий поворот не можна: лише 45° або 90° до попереднього відрізка', true);
+          return;
+        }
+        chooseDiagonal(main, { axis: option.axis, sign: option.sign });
+      });
+      pickerIcons.push({ icon, choice: { axis: option.axis, sign: option.sign } });
       return button;
     });
     picker.replaceChildren(caption, ...buttons);
+    rotatePickerIcons(viewer.screenAxes(point), main, sign);
+  };
+
+  /** Повернути стрілки на варіантах вибору 45° так, як діагональ піде на екрані. */
+  const rotatePickerIcons = (screen: Record<NudgeAxis, Vec2>, main: NudgeAxis, side: 1 | -1) => {
+    for (const { icon, choice } of pickerIcons) {
+      const m = screen[main];
+      const o = screen[choice.axis];
+      const dir = { x: side * m.x + choice.sign * o.x, y: side * m.y + choice.sign * o.y };
+      const longest = Math.max(Math.hypot(m.x, m.y), Math.hypot(o.x, o.y));
+      // Діагональ «у камеру» (на екрані майже точка) — без стрілки.
+      const visible = longest > 0 && Math.hypot(dir.x, dir.y) >= longest * 0.15;
+      icon.style.visibility = visible ? '' : 'hidden';
+      if (visible) icon.style.transform = `rotate(${Math.atan2(dir.y, dir.x)}rad)`;
+    }
   };
 
   // Стрілки осей біля точки.
@@ -562,10 +633,13 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     // Стрілки на самому джойстику — куди він рухає X і Z (з урахуванням «розведення» осей).
     const layout = joystickLayout({ X: screen.X, Z: screen.Z });
     const along = diagonalOnScreen(screen);
-    if (along && diagonal && diagonal.main !== 'Y') {
-      // Режим 45°: лінія основної осі на джойстику — вздовж діагоналі (туди, куди точка піде на екрані).
+    if (along && diagonal) {
+      // Режим 45°: на джойстику одна лінія «45°» — уздовж діагоналі, підпис з того боку, куди точка
+      // йде геть від початку відрізка (як помаранчева стрілка біля точки).
+      const side = diagonalSide();
       const l = Math.hypot(along.x, along.y);
-      stick.setAxes({ ...layout.dirs, [diagonal.main]: { x: along.x / l, y: along.y / l } }, diagonal.main, null);
+      const key: HorizontalAxis = diagonal.main === 'Y' ? (diagonal.choice.axis as HorizontalAxis) : diagonal.main;
+      stick.setAxes({ ...layout.dirs, [key]: { x: (side * along.x) / l, y: (side * along.y) / l } }, key, null, true);
     } else {
       stick.setAxes(controller.dirs ?? layout.dirs, shown === 'X' || shown === 'Z' ? shown : null, layout.layout.depth ?? null);
     }
@@ -575,6 +649,10 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     const longest = Math.max(...AXES.map((a) => Math.hypot(screen[a].x, screen[a].y)));
     const locked = segmentAxis();
     const second = diagonal?.choice ?? null;
+    if (!picker.hidden && segment && pickerIcons.length > 0) {
+      const main = segmentAxis();
+      if (main) rotatePickerIcons(screen, main, point[AXIS_KEY[main]] >= segment.anchor[AXIS_KEY[main]] ? 1 : -1);
+    }
     const forward = diagonalForward(screen);
     const forwardLen = forward ? Math.hypot(forward.x, forward.y) : 0;
     const diagVisible = !!forward && forwardLen > 0 && forwardLen >= longest * 0.15;
@@ -610,9 +688,10 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     confirm.disabled = !canConfirm();
     coords.replaceChildren(...coordinates(point));
     const locked = segmentAxis();
+    const usable = controlsUsable();
     for (const [control, off] of [
-      [stick.element, locked === 'Y'],
-      [slider.element, locked === 'X' || locked === 'Z'],
+      [stick.element, !usable.stick],
+      [slider.element, !usable.slider],
     ] as const) {
       control.classList.toggle('stick--off', off);
       control.setAttribute('aria-disabled', String(off));
@@ -622,7 +701,14 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     diagButton.hidden = !segment;
     diagButton.setAttribute('aria-pressed', String(!!diagonal));
     diagButton.classList.toggle('diag-button--on', !!diagonal);
-    diagButton.setAttribute('aria-label', diagonal ? 'Поворот 45° увімкнено. Натисніть, щоб відрізок став прямим' : 'Поворот під 45°');
+    // Точка ще на початку відрізка — «45°» бліда (натискання лише підкаже, що спершу потягти по осі).
+    diagButton.classList.toggle('diag-button--idle', !!segment && !diagonal && !locked);
+    // Увімкнено: видно й вибраний бік — «45° · Z+».
+    diagButton.textContent = diagonal ? `45° · ${optionLabel(diagonal.choice)}` : '45°';
+    diagButton.setAttribute(
+      'aria-label',
+      diagonal ? `Поворот 45° у бік ${optionLabel(diagonal.choice)} увімкнено. Натисніть, щоб відрізок став прямим` : 'Поворот під 45°',
+    );
     renderPicker(locked);
     if (noticeText) {
       shift.textContent = noticeText;

@@ -2467,8 +2467,8 @@ html.page-zoomed #app * {
   margin-bottom: 10px;
 }
 
-/* iPhone горизонтально: панель вузька — підпис окремим рядком, чотири варіанти під ним. */
-@media (max-height: 500px) {
+/* iPhone (вертикально й горизонтально): панель вузька — підпис окремим рядком, чотири варіанти під ним. */
+@media (max-height: 500px), (max-width: 699px) {
   .diag-picker {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px 6px;
@@ -2477,7 +2477,7 @@ html.page-zoomed #app * {
 
   .diag-picker .diag-picker-caption {
     grid-column: 1 / -1;
-    font-size: 13px;
+    font-size: 15px;
   }
 }
 
@@ -2513,9 +2513,57 @@ html.page-zoomed #app * {
   color: var(--axis-z);
 }
 
-.diag-option:disabled {
+.diag-option[aria-disabled='true'] {
   opacity: 0.3;
   cursor: default;
+}
+
+/* Стрілка на варіанті: куди піде діагональ на екрані (повертається разом з камерою). */
+.diag-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.diag-option-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
+.diag-option-icon svg {
+  display: block;
+}
+
+/* Увімкнена «45°» — суцільна, як вибраний перемикач iOS: видно здалеку. */
+.diag-button.diag-button--on {
+  border-color: transparent;
+  background: var(--tint);
+  color: var(--tint-label);
+  white-space: nowrap;
+}
+
+/* Точка ще на початку відрізка — «45°» бліда. */
+.diag-button--idle {
+  opacity: 0.45;
+}
+
+/* Увімкнена «Орто» — так само суцільна. */
+.view-button--ortho.view-button--active {
+  background: var(--tint);
+  color: var(--tint-label);
+  box-shadow: none;
+}
+
+/* Джойстик у режимі 45°: одна помаранчева лінія «45°» уздовж діагоналі. */
+.stick-guide.stick-guide--diag {
+  stroke: var(--accent);
+}
+
+.stick-guide-label.stick-guide--diag {
+  fill: var(--accent);
 }
 
 .diag-button:focus-visible,

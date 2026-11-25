@@ -60,6 +60,20 @@ export function installPageZoomGuard(root: HTMLElement): PageZoomGuard {
   banner.append(text, button);
   root.append(banner);
 
+  // Вирізи екрана (safe areas) — щоб заокруглений кут чи «острівець» iPhone не зрізав плашку.
+  // Значення env() у CSS px за масштабу 1, тобто в пікселях екрана — читаємо з невидимого «зонда».
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText =
+    'position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;' +
+    'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+  root.append(probe);
+  const safeArea = () => {
+    const style = getComputedStyle(probe);
+    const px = (v: string) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0);
+    return { top: px(style.paddingTop), right: px(style.paddingRight), left: px(style.paddingLeft) };
+  };
+
   let fingers = 0;
   let variant = false;
   const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
@@ -84,9 +98,12 @@ export function installPageZoomGuard(root: HTMLElement): PageZoomGuard {
     // Плашка — у лівому верхньому куті видимої частини, не збільшена разом зі сторінкою:
     // відступ 8 px і ширина «екран − 16 px» — у пікселях екрана за будь-якого масштабу.
     const k = 1 / viewport.scale;
-    const margin = BANNER_MARGIN_PX * k;
-    banner.style.transform = `translate(${viewport.offsetLeft + margin}px, ${viewport.offsetTop + margin}px) scale(${k})`;
-    banner.style.width = `${Math.max(0, viewport.width * viewport.scale - 2 * BANNER_MARGIN_PX)}px`;
+    const safe = safeArea();
+    const left = BANNER_MARGIN_PX + safe.left;
+    const top = BANNER_MARGIN_PX + safe.top;
+    const right = BANNER_MARGIN_PX + safe.right;
+    banner.style.transform = `translate(${viewport.offsetLeft + left * k}px, ${viewport.offsetTop + top * k}px) scale(${k})`;
+    banner.style.width = `${Math.max(0, viewport.width * viewport.scale - left - right)}px`;
   };
 
   let resetTimer = 0;
@@ -173,6 +190,7 @@ export function installPageZoomGuard(root: HTMLElement): PageZoomGuard {
       if (resetTimer) window.clearTimeout(resetTimer);
       html.classList.remove('page-zoomed');
       banner.remove();
+      probe.remove();
     },
   };
 }

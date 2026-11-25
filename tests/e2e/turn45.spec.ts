@@ -123,6 +123,8 @@ test.describe('Поворот 45° під час побудови траси', (
     await expect(button).toBeVisible();
     await expect(button).toHaveText('45°');
     await expect(button).toHaveAttribute('aria-pressed', 'false');
+    // Точка ще на початку відрізка — «45°» бліда.
+    await expect(button).toHaveClass(/diag-button--idle/);
     const box = (await button.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
@@ -135,10 +137,32 @@ test.describe('Поворот 45° під час побудови траси', (
     expect(straight.y).toBe(0);
     expect(straight.z).toBe(0);
 
-    // Вибір другої осі: чотири варіанти, кожен не менший за 44 px.
+    await expect(button).not.toHaveClass(/diag-button--idle/);
+    // Вибір другої осі: чотири варіанти, кожен не менший за 44 px; порядок сталий — «Y вгору / Y вниз» у кінці.
     await button.click();
     const picker = shown(page, 'segment-45-picker');
     await expect(picker).toBeVisible();
+    expect(await picker.locator('button').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))).toEqual([
+      'segment-45-z-plus',
+      'segment-45-z-minus',
+      'segment-45-y-plus',
+      'segment-45-y-minus',
+    ]);
+    // Стрілка на варіанті «Z+» — туди, куди діагональ X+Z+ піде на екрані.
+    {
+      const p0: P3 = (await editor(page)).point;
+      const [sa, sb] = [
+        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), p0),
+        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), { x: p0.x + 0.3, y: p0.y, z: p0.z + 0.3 }),
+      ];
+      const want = Math.atan2(sb.y - sa.y, sb.x - sa.x);
+      const got = await shown(page, 'segment-45-z-plus').locator('.diag-option-icon').evaluate((el) => {
+        const m = new DOMMatrix(getComputedStyle(el).transform);
+        return Math.atan2(m.b, m.a);
+      });
+      const diff = Math.atan2(Math.sin(got - want), Math.cos(got - want));
+      expect(Math.abs(diff), 'стрілка на «Z+» не туди, куди піде діагональ').toBeLessThan(0.05);
+    }
     for (const [id, text] of [
       ['z-plus', 'Z+'],
       ['z-minus', 'Z−'],
@@ -168,6 +192,8 @@ test.describe('Поворот 45° під час побудови траси', (
     expect(Math.abs(d.z - d.x)).toBeLessThan(TOL_M);
     expect(d.y).toBe(0);
     await expect(button).toHaveAttribute('aria-pressed', 'true');
+    // Увімкнена — видно й вибраний бік.
+    await expect(button).toHaveText('45° · Z+');
     await expect(shown(page, 'point-shift')).toHaveText(/^Відрізок 45°: X \+[\d\s,]+ · Z \+[\d\s,]+ = [\d\s,]+ мм$/);
     expect(e.segment.lengthMm).toBeCloseTo(d.x * Math.SQRT2 * 1000, 3);
     expect(e.canConfirm).toBe(true);
@@ -215,6 +241,16 @@ test.describe('Поворот 45° під час побудови траси', (
     expect(Math.abs(d.y - d.x)).toBeLessThan(TOL_M);
     expect(d.z).toBe(0);
     await expect(shown(page, 'point-shift')).toHaveText(/^Відрізок 45°: X \+[\d\s,]+ · Y \+[\d\s,]+ = /);
+    // Підйом під 45° ведуть і джойстик, і повзунок — однаково, з якої осі почали.
+    await expect(shown(page, 'stick-y')).not.toHaveClass(/stick--off/);
+    await expect(shown(page, 'stick-xz')).not.toHaveClass(/stick--off/);
+    const beforeSlider: P3 = e.point;
+    await pull(page, 'Y', 1, 400);
+    e = await editor(page);
+    d = offset(a1, e.point);
+    expect(e.point.y, 'повзунок угору — точка вгору').toBeGreaterThan(beforeSlider.y + 0.02);
+    expect(Math.abs(d.y - d.x)).toBeLessThan(TOL_M);
+    expect(d.z).toBe(0);
     await confirm(page);
 
     // Основна вісь — Y (повзунок): другу вісь вибираємо з X і Z.
@@ -229,6 +265,16 @@ test.describe('Поворот 45° під час побудови траси', (
     await expect(shown(page, 'segment-45-z-plus')).toBeDisabled();
     await expect(shown(page, 'segment-45-z-minus')).toBeDisabled();
     await shown(page, 'segment-45-x-minus').click();
+    // Основна вісь Y, друга X: джойстик теж веде вздовж діагоналі (геть від початку).
+    await expect(shown(page, 'stick-xz')).not.toHaveClass(/stick--off/);
+    {
+      const y0 = (await editor(page)).point.y;
+      await pullDiagonal(page, 1, 300);
+      const p1 = await editor(page);
+      expect(p1.point.y, 'джойстик уздовж діагоналі — точка вгору').toBeGreaterThan(y0 + 0.01);
+      const o = offset(p1.segment.anchor, p1.point);
+      expect(Math.abs(o.x + o.y)).toBeLessThan(TOL_M);
+    }
     e = await editor(page);
     const a2: P3 = e.segment.anchor;
     d = offset(a2, e.point);
@@ -297,9 +343,12 @@ test.describe('Поворот 45° під час побудови траси', (
     await expect(shown(page, 'segment-45-x-minus')).toBeDisabled();
     await expect(shown(page, 'segment-45-y-plus')).toBeEnabled();
     await expect(shown(page, 'segment-45-y-minus')).toBeEnabled();
-    // Натискання на неактивний варіант нічого не змінює.
+    // Натискання на неактивний варіант пояснює, чому не можна (без наведення курсору), і нічого не змінює.
+    // force: Playwright не клікає елементи з aria-disabled, а палець — натискає.
     await shown(page, 'segment-45-x-minus').click({ force: true });
     expect((await editor(page)).segment.diagonal).toBeNull();
+    await expect(shown(page, 'point-shift')).toHaveText('Такий поворот не можна: лише 45° або 90° до попереднього відрізка');
+    await expect(shown(page, 'segment-45-picker')).toBeVisible();
     await shown(page, 'segment-45-x-plus').click();
     let e = await editor(page);
     const d = offset(e.segment.anchor, e.point);
@@ -390,7 +439,7 @@ test.describe('Повітропровід на поворотах 45°', () => {
     await expect(page.getByTestId('duct-problems')).toHaveCount(0);
     await expect(page.getByTestId('duct-segment-0')).toContainText('X +1 000 мм');
     await expect(page.getByTestId('duct-segment-1')).toContainText('45° X+ Z+');
-    await expect(page.getByTestId('duct-segment-1')).toContainText('1 414,2 мм');
+    await expect(page.getByTestId('duct-segment-1')).toContainText('1 414,2 мм (зміщення 1 000)');
     // Габарит: труба Ø200 навколо траси — краї рівно на 100 мм від осі.
     const box = (await page.evaluate(() => window.__trasa!.app!.ductBox(1)))!;
     expect(Math.abs(box.min.x - -1500)).toBeLessThan(0.5);
@@ -504,6 +553,11 @@ test.describe('Скріншоти: повороти 45°', () => {
         await frames(page, 4);
         await shot('45-rise');
 
+        // Труби: завершити трасу, відкрити «Повітропровід», підставити траси з колінами 45°.
+        await confirm(page);
+        await page.getByTestId('route-finish').click();
+        await page.getByTestId('duct').click();
+        await expect(page.getByTestId('duct-panel')).toBeVisible();
         await page.evaluate(() =>
           window.__trasa!.app!.loadRoutes({
             routes: [
@@ -532,6 +586,7 @@ test.describe('Скріншоти: повороти 45°', () => {
             nextId: 3,
           }),
         );
+        await page.getByTestId('duct-route-2').click();
         await page.evaluate(() => window.__trasa!.viewer.setView({ x: 1.6, y: 3.6, z: 3.6 }, { x: 0, y: 1.1, z: 0 }));
         await frames(page, 6);
         await shot('45-ducts');

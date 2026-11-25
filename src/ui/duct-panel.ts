@@ -343,7 +343,12 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       // «X +2 500 мм» — уздовж осі; «45° X+ Z− · 1 414 мм» — діагональ.
       const signs = (heading?.parts ?? []).map((part) => `${part.axis}${part.sign > 0 ? '+' : '−'}`);
       const dirText =
-        signs.length === 1 ? `${signs[0]!.slice(0, 1)} ${signs[0]!.slice(1)}${mm(len)}` : signs.length === 2 ? `45° ${signs.join(' ')} · ${mm(len)}` : mm(len);
+        signs.length === 1
+          ? `${signs[0]!.slice(0, 1)} ${signs[0]!.slice(1)}${mm(len)}`
+          : signs.length === 2
+            ? // Монтажник міряє зміщення — його теж видно: «45° X+ Z+ · 1 414,2 мм (зміщення 1 000)».
+              `45° ${signs.join(' ')} · ${mm(len)} (зміщення ${formatMm(len * Math.SQRT1_2).replace(/\s*мм$/, '')})`
+            : mm(len);
       row.append(el('span', 'route-row-name', `${i + 1} · ${dirText}`));
       const t = transitionOn.get(i);
       let meta = t ? `перехід ${formatSection(i === 0 ? spec.section : sections[i - 1]!)} → ${formatSection(t.to)}` : formatSection(sections[i]!);
@@ -428,7 +433,7 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     return box;
   }
 
-  function transitionsAndProblems(r: Route, spec: DuctSpec): HTMLElement[] {
+  function transitions(r: Route, spec: DuctSpec): HTMLElement[] {
     const out: HTMLElement[] = [];
     const count = r.nodes.length - 1;
     const sections = sectionsBySegment(spec, count);
@@ -450,6 +455,14 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       }
       out.push(list);
     }
+    return out;
+  }
+
+  /**
+   * Пояснення проблем траси (закороткі відрізки, повороти прямокутної труби не в площині сторін).
+   * Стоїть одразу під вибором траси — на iPhone його видно без прокрутки панелі.
+   */
+  function problemsBox(r: Route, spec: DuctSpec): HTMLElement | null {
     const layout = ductLayout(r.nodes, spec);
     const problems = layout.problems;
     if (problems.length > 0 || layout.oblique.length > 0) {
@@ -474,9 +487,9 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
           ),
         );
       }
-      out.push(box);
+      return box;
     }
-    return out;
+    return null;
   }
 
   function render(): void {
@@ -512,10 +525,12 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
     if (!r) {
       children.push(el('p', 'ruler-sub', 'Виберіть трасу, щоб задати їй повітропровід'));
     } else {
+      const problems = r.duct ? problemsBox(r, r.duct) : null;
+      if (problems) children.push(problems);
       children.push(sizeControls(r));
       if (r.duct) {
         children.push(segmentList(r, r.duct));
-        children.push(...transitionsAndProblems(r, r.duct));
+        children.push(...transitions(r, r.duct));
       } else {
         children.push(el('p', 'ruler-sub', 'Задайте розмір — уся траса стане цього розміру'));
       }
