@@ -107,9 +107,9 @@ test.describe('Масштаб сторінки', () => {
 
 test.describe('Камера їде за точкою', () => {
   test('точку тягнуть далеко за скан: вона лишається у видимій частині, камера не повертається й не робить ривка', async ({ page }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     await startPull(page);
-    // Камера ближче — щоб і на великому екрані iPad точка за 11 с дійшла до краю видимої частини.
+    // Камера ближче — щоб і на великому екрані iPad точка швидко дійшла до краю видимої частини.
     await page.evaluate(() => window.__trasa!.viewer.setView({ x: 1.2, y: 2.6, z: 4.6 }, { x: -0.3, y: 0.3, z: 0.3 }));
     const view = () =>
       page.evaluate(() => {
@@ -129,7 +129,15 @@ test.describe('Камера їде за точкою', () => {
     await page.mouse.move(cx, cy);
     await page.mouse.down();
     await page.mouse.move(cx + (axes.X.x / len) * 64, cy + (axes.X.y / len) * 64, { steps: 3 });
-    await page.waitForTimeout(11_000);
+    // Тримаємо, доки точка не відійде на 2,7 м (за стіну) і камера не поїде за нею — не довше 45 с:
+    // у CI (WebKit без відеокарти) частота кадрів дуже різна, і хід за той самий час теж.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 45_000) {
+      await page.waitForTimeout(1000);
+      const p = await point();
+      const v = await view();
+      if (p.x - start.x > 2.7 && Math.hypot(v.position.x - before.position.x, v.position.z - before.position.z) > 0.35) break;
+    }
     // Під час утримання: точка далеко за сканом, але на екрані й не під панелями.
     const onScreen = async () => {
       const p = await point();

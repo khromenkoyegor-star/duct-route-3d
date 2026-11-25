@@ -149,14 +149,11 @@ test.describe('Поворот 45° під час побудови траси', (
       'segment-45-y-plus',
       'segment-45-y-minus',
     ]);
-    // Стрілка на варіанті «Z+» — туди, куди діагональ X+Z+ піде на екрані.
+    // Стрілка на варіанті «Z+» — туди, куди діагональ X+Z+ піде на екрані (сума екранних стрілок X+ і Z+ біля точки).
     {
       const p0: P3 = (await editor(page)).point;
-      const [sa, sb] = [
-        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), p0),
-        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), { x: p0.x + 0.3, y: p0.y, z: p0.z + 0.3 }),
-      ];
-      const want = Math.atan2(sb.y - sa.y, sb.x - sa.x);
+      const ax = await page.evaluate((p) => window.__trasa!.viewer.screenAxes(p), p0);
+      const want = Math.atan2(ax.X.y + ax.Z.y, ax.X.x + ax.Z.x);
       const got = await shown(page, 'segment-45-z-plus').locator('.diag-option-icon').evaluate((el) => {
         const m = new DOMMatrix(getComputedStyle(el).transform);
         return Math.atan2(m.b, m.a);

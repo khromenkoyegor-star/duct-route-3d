@@ -535,10 +535,20 @@ const visibility = (page: Page, point: P3) =>
   }, point);
 
 /**
- * Тримати джойстик чи повзунок `totalMs`, кожні `sampleMs` перевіряючи, що точку видно.
+ * Тримати джойстик чи повзунок, кожні `sampleMs` перевіряючи, що точку видно: доки `until` не скаже «досить»
+ * (точка пройшла потрібне), але не довше `totalMs`. Без `until` — рівно `totalMs`. Так тест не залежить від
+ * частоти кадрів: у CI (WebKit без відеокарти) вона то вища, то нижча, і хід за той самий час дуже різний.
  * Повертає зразки й камеру до, під час (перед відпусканням), одразу після й через 400 мс після відпускання.
  */
-async function holdAndWatch(page: Page, testid: string, dx: number, dy: number, totalMs: number, sampleMs = 1500) {
+async function holdAndWatch(
+  page: Page,
+  testid: string,
+  dx: number,
+  dy: number,
+  totalMs: number,
+  sampleMs = 1500,
+  until?: (point: P3, start: P3, cameraBefore: Awaited<ReturnType<typeof camera>>) => Promise<boolean> | boolean,
+) {
   const before = await camera(page);
   const start: P3 = (await editor(page)).point;
   const b = (await shown(page, testid).boundingBox())!;
@@ -553,6 +563,7 @@ async function holdAndWatch(page: Page, testid: string, dx: number, dy: number, 
     const point: P3 = (await editor(page)).point;
     const v = await visibility(page, point);
     samples.push({ t, point, ...v });
+    if (until && (await until(point, start, before))) break;
   }
   const during = await camera(page);
   await page.mouse.up();
@@ -585,8 +596,8 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
   test('повзунок угору 9 с (точка вище стелі): точка у видимій частині, камера лише зсувається, без ривка', async ({ page }) => {
     test.setTimeout(60_000);
     await startPull(page, undefined, { x: 1.2, y: 2.6, z: 4.6 }, { x: -0.3, y: 0.3, z: 0.3 });
-    // 12 с: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
-    const r = await holdAndWatch(page, 'stick-y', 0, -1, 12_000);
+    test.setTimeout(90_000);
+    const r = await holdAndWatch(page, 'stick-y', 0, -1, 45_000, 1500, (p, s) => p.y - s.y > 2.9);
     expect(r.end.y - r.start.y, 'точка мала піднятись вище стелі (2,7 м)').toBeGreaterThan(2.8);
     expectFollowed(r, 'вгору');
     expect(moved(r.after.position, r.before.position), 'камера не їхала за точкою').toBeGreaterThan(0.3);
@@ -598,7 +609,9 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
     await pull(page, 'X', 1, 300);
     await choose45(page, 'z-minus');
     const d = await stickDir(page, 'X');
-    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 8000);
+    const anchor: P3 = (await editor(page)).segment.anchor;
+    test.setTimeout(90_000);
+    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 45_000, 1500, (p) => p.x - anchor.x > 2.1);
     const o = offset((await editor(page)).segment.anchor, r.end);
     expect(o.x).toBeGreaterThan(2);
     expect(Math.abs(o.x + o.z)).toBeLessThan(TOL_M);
@@ -612,8 +625,11 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
     await page.getByTestId('view-ortho').click();
     await frames(page);
     const d = await stickDir(page, 'X');
-    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 9000);
-    // Під навантаженням кадри рідшають і частина ходу губиться, тож поріг — 2 м (усе одно далеко за стіною).
+    test.setTimeout(90_000);
+    // Тримаємо, доки точка не відійде на 2 м і камера не поїде за нею (не довше 45 с).
+    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 45_000, 1500, async (p, s, cam0) => {
+      return p.x - s.x > 2.1 && moved((await camera(page)).position, cam0.position) > 0.15;
+    });
     expect(r.end.x - r.start.x).toBeGreaterThan(2);
     expectFollowed(r, '«Орто»');
     // Скільки камера проїде, залежить від того, наскільки точка вийшла за край (а це — від частоти кадрів):
@@ -623,11 +639,11 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
   });
 
   test('точку тягнуть до камери (Z+, камера з боку +Z) 22 с: точка весь час у видимій частині, не опиняється за камерою', async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(150_000);
     await startPull(page);
     const d = await stickDir(page, 'Z');
-    // 32 с: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
-    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 32_000, 2000);
+    // Тримаємо, доки точка не пройде 8,5 м (повз камеру), але не довше 100 с.
+    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 100_000, 2000, (p, s) => p.z - s.z > 8.5);
     expect(r.end.z - r.start.z, 'точка мала пройти повз камеру (z камери ≈ 9 м)').toBeGreaterThan(8);
     expectFollowed(r, 'до камери');
   });
@@ -980,7 +996,9 @@ test.describe('Етап 4.1 (tester): ортогональна проекція 
 
   test('«Орто» вмикають і вимикають 6 разів під час доведення точки: точка й її розмір на екрані не «пливуть» (±2 %)', async ({ page }) => {
     await startPull(page);
-    await pull(page, 'Y', 1, 1500);
+    // Повзунок угору, доки точка не підніметься на 0,25 м (не довше 20 с).
+    await holdAndWatch(page, 'stick-y', 0, -0.9, 20_000, 300, (p, s) => p.y - s.y > 0.25);
+    await frames(page, 3);
     const point: P3 = (await editor(page)).point;
     expect(point.y).toBeGreaterThan(0.2);
     const cam = await camera(page);

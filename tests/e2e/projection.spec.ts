@@ -221,7 +221,12 @@ test.describe('Ортогональна проекція', () => {
     await page.mouse.move(slider.x + slider.width / 2, slider.y + slider.height / 2);
     await page.mouse.down();
     await page.mouse.move(slider.x + slider.width / 2, slider.y + slider.height / 2 - 58, { steps: 3 });
-    await page.waitForTimeout(1500);
+    // Тримаємо, доки точка не підніметься на 0,25 м (не довше 20 с): у CI кадри то рідші, то частіші.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20_000) {
+      await page.waitForTimeout(300);
+      if ((await state(page)).routes.editor.point.y > 0.25) break;
+    }
     await page.mouse.up();
     await frames(page, 5);
     const point: P3 = (await state(page)).routes.editor.point;
