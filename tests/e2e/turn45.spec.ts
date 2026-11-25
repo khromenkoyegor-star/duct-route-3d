@@ -142,6 +142,7 @@ test.describe('Поворот 45° під час побудови траси', (
     await button.click();
     const picker = shown(page, 'segment-45-picker');
     await expect(picker).toBeVisible();
+    await frames(page, 2);
     expect(await picker.locator('button').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))).toEqual([
       'segment-45-z-plus',
       'segment-45-z-minus',
@@ -199,10 +200,11 @@ test.describe('Поворот 45° під час побудови траси', (
     expect(e.canConfirm).toBe(true);
 
     // Той самий джойстик (по X) веде точку вздовж діагоналі.
-    await pull(page, 'X', 1, 400);
+    await pull(page, 'X', 1, 600);
     e = await editor(page);
     const further = offset(anchor, e.point);
-    expect(further.x).toBeGreaterThan(d.x + 0.03);
+    // Поріг невеликий: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
+    expect(further.x).toBeGreaterThan(d.x + 0.01);
     expect(Math.abs(further.z - further.x)).toBeLessThan(TOL_M);
     expect(further.y).toBe(0);
     // Джойстик у бік другої осі (Z) теж веде по тій самій діагоналі, а не ламає її.

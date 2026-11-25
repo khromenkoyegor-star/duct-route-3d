@@ -585,8 +585,9 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
   test('повзунок угору 9 с (точка вище стелі): точка у видимій частині, камера лише зсувається, без ривка', async ({ page }) => {
     test.setTimeout(60_000);
     await startPull(page, undefined, { x: 1.2, y: 2.6, z: 4.6 }, { x: -0.3, y: 0.3, z: 0.3 });
-    const r = await holdAndWatch(page, 'stick-y', 0, -1, 9000);
-    expect(r.end.y - r.start.y, 'точка мала піднятись > 3 м').toBeGreaterThan(3);
+    // 12 с: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
+    const r = await holdAndWatch(page, 'stick-y', 0, -1, 12_000);
+    expect(r.end.y - r.start.y, 'точка мала піднятись вище стелі (2,7 м)').toBeGreaterThan(2.8);
     expectFollowed(r, 'вгору');
     expect(moved(r.after.position, r.before.position), 'камера не їхала за точкою').toBeGreaterThan(0.3);
   });
@@ -622,10 +623,11 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
   });
 
   test('точку тягнуть до камери (Z+, камера з боку +Z) 22 с: точка весь час у видимій частині, не опиняється за камерою', async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     await startPull(page);
     const d = await stickDir(page, 'Z');
-    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 22_000, 2000);
+    // 32 с: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
+    const r = await holdAndWatch(page, 'stick-xz', d.x, d.y, 32_000, 2000);
     expect(r.end.z - r.start.z, 'точка мала пройти повз камеру (z камери ≈ 9 м)').toBeGreaterThan(8);
     expectFollowed(r, 'до камери');
   });

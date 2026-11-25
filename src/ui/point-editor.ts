@@ -472,7 +472,8 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     render();
     // Панель стала вищою (рядок вибору) — точка не має опинитись під нею: зсуваємо камеру, без повороту.
     const area = pickerOpen ? followArea() : null;
-    if (area) viewer.followPoint(point, area);
+    // Камера зсунулась — стрілки на варіантах одразу під новий вигляд (а не з наступним кадром).
+    if (area && viewer.followPoint(point, area)) render();
   });
 
   /** Вибрали другу вісь: відрізок стає діагональним — зміщення по ній дорівнює ходу по основній. */
