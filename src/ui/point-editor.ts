@@ -302,7 +302,7 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       if (along && diagonal) {
         // Режим 45°: джойстик веде точку вздовж діагоналі так, як вона йде на екрані.
         axis = diagonal.main;
-        stick.setKnobAxis(axis);
+        stick.setKnobAxis('45°');
         const deltaMm = diagonalStep(stick.value, along, dt);
         if (deltaMm !== 0) changed = apply(diagonal.main, deltaMm, now);
       } else {
@@ -316,7 +316,7 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       // Одночасно — лише одна вісь: джойстик має перевагу, повзунок — коли джойстик вільний.
       const step = sliderStep(-slider.value.y, dt);
       if (step) {
-        slider.setKnobAxis('Y');
+        slider.setKnobAxis(diagonal ? '45°' : 'Y');
         if (diagonal && diagonal.main !== 'Y') {
           // Діагональ з Y як другою віссю: повзунок угору — точка вгору вздовж діагоналі
           // (висота змінюється рівно на стільки ж, на скільки хід по основній осі).

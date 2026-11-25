@@ -439,7 +439,7 @@ test.describe('Повітропровід на поворотах 45°', () => {
     await expect(page.getByTestId('duct-problems')).toHaveCount(0);
     await expect(page.getByTestId('duct-segment-0')).toContainText('X +1 000 мм');
     await expect(page.getByTestId('duct-segment-1')).toContainText('45° X+ Z+');
-    await expect(page.getByTestId('duct-segment-1')).toContainText('1 414,2 мм (зміщення 1 000)');
+    await expect(page.getByTestId('duct-segment-1')).toContainText('1 414,2 мм (зміщення 1 000 мм)');
     // Габарит: труба Ø200 навколо траси — краї рівно на 100 мм від осі.
     const box = (await page.evaluate(() => window.__trasa!.app!.ductBox(1)))!;
     expect(Math.abs(box.min.x - -1500)).toBeLessThan(0.5);

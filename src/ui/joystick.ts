@@ -29,8 +29,8 @@ export interface Stick {
     depth?: HorizontalAxis | null,
     diagonal?: boolean,
   ): void;
-  /** Вісь, яку показує «кулька» під час руху (колір і літера). */
-  setKnobAxis(axis: 'X' | 'Y' | 'Z' | null): void;
+  /** Вісь, яку показує «кулька» під час руху (колір і літера); «45°» — рух по діагоналі. */
+  setKnobAxis(axis: 'X' | 'Y' | 'Z' | '45°' | null): void;
   dispose(): void;
 }
 
@@ -212,7 +212,7 @@ export function createStick(options: StickOptions): Stick {
       }
     },
     setKnobAxis(axis) {
-      knob.dataset.axis = axis ?? '';
+      knob.dataset.axis = axis === '45°' ? '45' : (axis ?? '');
       knob.textContent = axis ?? '';
     },
     dispose() {

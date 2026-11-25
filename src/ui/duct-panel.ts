@@ -343,13 +343,14 @@ export function createDuctPanel(handlers: DuctPanelHandlers): DuctPanel {
       // «X +2 500 мм» — уздовж осі; «45° X+ Z− · 1 414 мм» — діагональ.
       const signs = (heading?.parts ?? []).map((part) => `${part.axis}${part.sign > 0 ? '+' : '−'}`);
       const dirText =
-        signs.length === 1
-          ? `${signs[0]!.slice(0, 1)} ${signs[0]!.slice(1)}${mm(len)}`
-          : signs.length === 2
-            ? // Монтажник міряє зміщення — його теж видно: «45° X+ Z+ · 1 414,2 мм (зміщення 1 000)».
-              `45° ${signs.join(' ')} · ${mm(len)} (зміщення ${formatMm(len * Math.SQRT1_2).replace(/\s*мм$/, '')})`
-            : mm(len);
-      row.append(el('span', 'route-row-name', `${i + 1} · ${dirText}`));
+        signs.length === 1 ? `${signs[0]!.slice(0, 1)} ${signs[0]!.slice(1)}${mm(len)}` : signs.length === 2 ? `45° ${signs.join(' ')} · ${mm(len)}` : mm(len);
+      const name = el('span', 'route-row-name', `${i + 1} · ${dirText}`);
+      if (signs.length === 2) {
+        // Монтажник міряє зміщення — його теж видно: «45° X+ Z+ · 1 414,2 мм (зміщення 1 000 мм)»;
+        // дужки переносяться цілими, не розриваючись посередині.
+        name.append(' ', el('span', 'duct-offset', `(зміщення ${mm(len * Math.SQRT1_2)})`));
+      }
+      row.append(name);
       const t = transitionOn.get(i);
       let meta = t ? `перехід ${formatSection(i === 0 ? spec.section : sections[i - 1]!)} → ${formatSection(t.to)}` : formatSection(sections[i]!);
       if (problem) meta = `замало: треба ${mm(problem.needMm)}, є ${mm(problem.haveMm)}`;

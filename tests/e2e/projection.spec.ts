@@ -92,6 +92,13 @@ test.describe('Ортогональна проекція', () => {
     await toggleOrtho(page, 'ortho');
     await expect(button).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('view-toast')).toHaveText('Ортогональна проекція');
+    // Увімкнена — суцільна, і напис на ній видно: колір тексту не збігається з тлом.
+    const colors = await button.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { text: cs.color, background: cs.backgroundColor };
+    });
+    expect(colors.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(colors.text, 'напис «Орто» зливається з тлом').not.toBe(colors.background);
     expect(await page.evaluate(() => window.__trasa!.viewer.projection)).toBe('ortho');
 
     await toggleOrtho(page, 'perspective');

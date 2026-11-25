@@ -2459,26 +2459,18 @@ html.page-zoomed #app * {
 }
 
 /* Вибір другої осі: підпис і чотири варіанти в один рядок. */
+/* Вибір другої осі: підпис окремим рядком, чотири варіанти під ним на всю ширину панелі
+   (так «Y вгору» зі стрілкою вміщається і на iPad, і на iPhone). */
 .diag-picker {
   display: grid;
-  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: 4px 6px;
+  margin-bottom: 8px;
 }
 
-/* iPhone (вертикально й горизонтально): панель вузька — підпис окремим рядком, чотири варіанти під ним. */
-@media (max-height: 500px), (max-width: 699px) {
-  .diag-picker {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px 6px;
-    margin-bottom: 8px;
-  }
-
-  .diag-picker .diag-picker-caption {
-    grid-column: 1 / -1;
-    font-size: 15px;
-  }
+.diag-picker .diag-picker-caption {
+  grid-column: 1 / -1;
 }
 
 .diag-picker-caption {
@@ -2583,10 +2575,6 @@ html.page-zoomed #app * {
   color: var(--label);
 }
 
-.view-button--ortho.view-button--active {
-  color: var(--tint);
-}
-
 /* Режим 45°: стрілка «45°» уздовж діагоналі біля точки — помаранчева (синій — уже вісь Z). */
 .axis-arrow--diag line {
   stroke: var(--accent);
@@ -2595,4 +2583,21 @@ html.page-zoomed #app * {
 .axis-arrow--diag polygon,
 .axis-arrow--diag text {
   fill: var(--accent);
+}
+
+/* Кулька джойстика в режимі 45° — «45°» помаранчевим, як стрілка біля точки. */
+.stick-knob[data-axis='45'] {
+  background: var(--accent);
+  font-size: 13px;
+}
+
+/* Вимкнений орган керування (сірий): кулька стоїть і не синіє — видно, що він зараз не діє. */
+.stick--off .stick-knob {
+  transform: none !important;
+  background: var(--knob-bg) !important;
+}
+
+/* «(зміщення 1 000 мм)» у рядку діагонального відрізка — переноситься лише цілим. */
+.duct-offset {
+  white-space: nowrap;
 }
