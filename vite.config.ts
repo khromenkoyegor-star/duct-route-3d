@@ -13,8 +13,10 @@ function gitShortSha(): string {
 }
 
 export default defineConfig({
-  // Адреса на GitHub Pages: https://khromenkoyegor-star.github.io/duct-route-3d/
-  base: '/duct-route-3d/',
+  // «Траса 3D 2» (нова версія, у ній ведеться вся подальша робота):
+  // https://khromenkoyegor-star.github.io/duct-route-3d/next/
+  // Стара адреса …/duct-route-3d/ — незмінна стабільна версія 4.1 (див. .github/workflows/ci.yml).
+  base: '/duct-route-3d/next/',
   define: {
     __APP_VERSION__: JSON.stringify(gitShortSha()),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString()),

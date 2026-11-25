@@ -9,7 +9,8 @@ const CI = !!process.env.CI;
 const browserName = (process.env.PW_BROWSER ?? (CI ? 'webkit' : 'chromium')) as 'webkit' | 'chromium';
 
 const PORT = 4173;
-export const BASE_PATH = '/duct-route-3d/';
+/** Нова версія «Траса 3D 2» (див. vite.config.ts); стара адреса — незмінна стабільна версія 4.1. */
+export const BASE_PATH = '/duct-route-3d/next/';
 
 export default defineConfig({
   testDir: 'tests/e2e',

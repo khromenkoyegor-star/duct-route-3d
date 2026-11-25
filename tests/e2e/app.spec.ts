@@ -70,7 +70,7 @@ async function countColoredPixels(
 test.describe('Етап 0: порожня 3D-сцена', () => {
   test('відкривається без помилок і малює сцену', async ({ page }) => {
     const errors = await openApp(page);
-    await expect(page).toHaveTitle('Траса 3D');
+    await expect(page).toHaveTitle('Траса 3D 2');
     await expect(page.locator('canvas.viewport')).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -175,10 +175,11 @@ test.describe('Етап 0: PWA («На початковий екран»)', () =
       scope: string;
       icons: Array<{ src: string; sizes: string; type: string }>;
     };
-    expect(manifest.name).toBe('Траса 3D');
-    expect(manifest.short_name).toBe('Траса 3D');
+    // Нова версія — окрема програма на початковому екрані поруч зі стабільною «Траса 3D».
+    expect(manifest.name).toBe('Траса 3D 2');
+    expect(manifest.short_name).toBe('Траса 3D 2');
     expect(manifest.display).toBe('standalone');
-    // start_url і scope — це саме адреса додатка (з урахуванням /duct-route-3d/).
+    // start_url і scope — це саме адреса додатка (з урахуванням /duct-route-3d/next/).
     expect(new URL(manifest.start_url, manifestUrl).href).toBe(page.url());
     expect(new URL(manifest.scope, manifestUrl).href).toBe(page.url());
 
@@ -196,7 +197,7 @@ test.describe('Етап 0: PWA («На початковий екран»)', () =
     await openApp(page);
     const head = page.locator('head');
     await expect(head.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
-    await expect(head.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Траса 3D');
+    await expect(head.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Траса 3D 2');
     await expect(head.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=cover/);
 
     const iconHref = await head.locator('link[rel="apple-touch-icon"]').getAttribute('href');
