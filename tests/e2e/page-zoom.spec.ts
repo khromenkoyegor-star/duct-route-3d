@@ -109,7 +109,7 @@ test.describe('Камера їде за точкою', () => {
   test('точку тягнуть далеко за скан: вона лишається у видимій частині, камера не повертається й не робить ривка', async ({ page }) => {
     test.setTimeout(60_000);
     await startPull(page);
-    // Камера ближче — щоб і на великому екрані iPad точка за 9 с дійшла до краю видимої частини.
+    // Камера ближче — щоб і на великому екрані iPad точка за 11 с дійшла до краю видимої частини.
     await page.evaluate(() => window.__trasa!.viewer.setView({ x: 1.2, y: 2.6, z: 4.6 }, { x: -0.3, y: 0.3, z: 0.3 }));
     const view = () =>
       page.evaluate(() => {
@@ -129,7 +129,7 @@ test.describe('Камера їде за точкою', () => {
     await page.mouse.move(cx, cy);
     await page.mouse.down();
     await page.mouse.move(cx + (axes.X.x / len) * 64, cy + (axes.X.y / len) * 64, { steps: 3 });
-    await page.waitForTimeout(9000);
+    await page.waitForTimeout(11_000);
     // Під час утримання: точка далеко за сканом, але на екрані й не під панелями.
     const onScreen = async () => {
       const p = await point();
@@ -148,7 +148,8 @@ test.describe('Камера їде за точкою', () => {
       return p;
     };
     const held = await onScreen();
-    expect(held.x - start.x).toBeGreaterThan(3);
+    // Далеко за скан: початок x = −0,5 м, стіна кімнати — x = 2 м.
+    expect(held.x - start.x).toBeGreaterThan(2.6);
     const during = await view();
     await page.mouse.up();
     const released = await view();

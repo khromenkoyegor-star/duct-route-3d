@@ -2373,9 +2373,11 @@ html.page-zoomed #app * {
 }
 
 .zoom-banner {
+  /* Відступ 8 px від краю видимої частини задає page-zoom.ts (сталий на екрані за будь-якого масштабу). */
   position: fixed;
-  left: 8px;
-  top: 8px;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
   z-index: 100;
   display: flex;
   align-items: center;
@@ -2535,4 +2537,14 @@ html.page-zoomed #app * {
 
 .view-button--ortho.view-button--active {
   color: var(--tint);
+}
+
+/* Режим 45°: стрілка «45°» уздовж діагоналі біля точки — помаранчева (синій — уже вісь Z). */
+.axis-arrow--diag line {
+  stroke: var(--accent);
+}
+
+.axis-arrow--diag polygon,
+.axis-arrow--diag text {
+  fill: var(--accent);
 }

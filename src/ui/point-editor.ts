@@ -22,6 +22,8 @@
  */
 import {
   createStickController,
+  diagonalScreenDirection,
+  diagonalStep,
   joystickLayout,
   movePoint,
   type NudgeAxis,
@@ -216,6 +218,17 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     pickerOpen = false;
   };
 
+  /**
+   * Режим 45° з основною віссю X чи Z: куди на екрані рухається точка, коли основна координата
+   * зростає (сума стрілок двох осей). null — не режим 45° (або основна вісь Y: тоді веде повзунок).
+   */
+  const diagonalOnScreen = (screen: Record<NudgeAxis, Vec2>): Vec2 | null => {
+    if (!diagonal || diagonal.main === 'Y' || !segment || !point) return null;
+    const key = AXIS_KEY[diagonal.main];
+    const side = point[key] >= segment.anchor[key] ? 1 : -1;
+    return diagonalScreenDirection(screen[diagonal.main], screen[diagonal.choice.axis], side, diagonal.choice.sign);
+  };
+
   /** Зсунути точку на крок; true — точка змінилась. */
   const apply = (stepAxis: NudgeAxis, deltaMm: number, now: number): boolean => {
     if (!point) return false;
@@ -264,11 +277,20 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     const sliderUsable = locked === null || locked === 'Y';
     if (stick.active && stickUsable) {
       const screen = viewer.screenAxes(point);
-      const only = locked === 'X' || locked === 'Z' ? locked : null;
-      const step = controller.update(stick.value, { X: screen.X, Z: screen.Z }, dt, only);
-      axis = controller.axis;
-      stick.setKnobAxis(axis);
-      if (step) changed = apply(step.axis, step.deltaMm, now);
+      const along = diagonalOnScreen(screen);
+      if (along && diagonal) {
+        // Режим 45°: джойстик веде точку вздовж діагоналі так, як вона йде на екрані.
+        axis = diagonal.main;
+        stick.setKnobAxis(axis);
+        const deltaMm = diagonalStep(stick.value, along, dt);
+        if (deltaMm !== 0) changed = apply(diagonal.main, deltaMm, now);
+      } else {
+        const only = locked === 'X' || locked === 'Z' ? locked : null;
+        const step = controller.update(stick.value, { X: screen.X, Z: screen.Z }, dt, only);
+        axis = controller.axis;
+        stick.setKnobAxis(axis);
+        if (step) changed = apply(step.axis, step.deltaMm, now);
+      }
     } else if (slider.active && sliderUsable) {
       // Одночасно — лише одна вісь: джойстик має перевагу, повзунок — коли джойстик вільний.
       const step = sliderStep(-slider.value.y, dt);
@@ -476,6 +498,58 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     svg.append(group);
     return { name, group, line, head, text };
   });
+  // Режим 45°: одна виразна стрілка «45°» уздовж діагоналі — туди, куди точка йде на екрані
+  // (і куди веде джойстик); стрілки двох осей тоді бліді.
+  const diagArrow = (() => {
+    const group = document.createElementNS(SVG_NS, 'g');
+    group.setAttribute('class', 'axis-arrow axis-arrow--diag axis-arrow--active');
+    group.setAttribute('data-testid', 'axis-arrow-45');
+    const line = document.createElementNS(SVG_NS, 'line');
+    const head = document.createElementNS(SVG_NS, 'polygon');
+    const text = document.createElementNS(SVG_NS, 'text');
+    text.textContent = '45°';
+    group.append(line, head, text);
+    group.style.display = 'none';
+    svg.append(group);
+    return { group, line, head, text };
+  })();
+
+  /** Намалювати стрілку від точки `base` (px екрана) в напрямку (ux, uy) — одиничному. */
+  const placeArrow = (
+    parts: { line: SVGLineElement; head: SVGPolygonElement; text: SVGTextElement },
+    base: Vec2,
+    ux: number,
+    uy: number,
+    labelGap = 16,
+  ) => {
+    const tipX = base.x + ux * ARROW_PX;
+    const tipY = base.y + uy * ARROW_PX;
+    // Без «хвоста» за точкою й з відступом від неї — місце виміру не закрите.
+    parts.line.setAttribute('x1', String(base.x + ux * ARROW_GAP_PX));
+    parts.line.setAttribute('y1', String(base.y + uy * ARROW_GAP_PX));
+    parts.line.setAttribute('x2', String(tipX));
+    parts.line.setAttribute('y2', String(tipY));
+    const side = 6;
+    const back = 12;
+    parts.head.setAttribute(
+      'points',
+      `${tipX + ux * 4},${tipY + uy * 4} ${tipX - ux * back - uy * side},${tipY - uy * back + ux * side} ` +
+        `${tipX - ux * back + uy * side},${tipY - uy * back - ux * side}`,
+    );
+    parts.text.setAttribute('x', String(tipX + ux * labelGap));
+    parts.text.setAttribute('y', String(tipY + uy * labelGap + 5));
+  };
+
+  /** Режим 45° (будь-яка основна вісь): напрямок діагоналі на екрані геть від початку відрізка. */
+  const diagonalForward = (screen: Record<NudgeAxis, Vec2>): Vec2 | null => {
+    if (!diagonal || !segment || !point) return null;
+    const key = AXIS_KEY[diagonal.main];
+    const side = point[key] >= segment.anchor[key] ? 1 : -1;
+    const main = screen[diagonal.main];
+    const other = screen[diagonal.choice.axis];
+    const k = diagonal.choice.sign;
+    return { x: side * main.x + k * other.x, y: side * main.y + k * other.y };
+  };
 
   const drawArrows = () => {
     if (!point || element.hidden) {
@@ -487,13 +561,25 @@ export function createPointEditor(viewer: Viewer): PointEditor {
     const shown = axis ?? segmentAxis();
     // Стрілки на самому джойстику — куди він рухає X і Z (з урахуванням «розведення» осей).
     const layout = joystickLayout({ X: screen.X, Z: screen.Z });
-    stick.setAxes(controller.dirs ?? layout.dirs, shown === 'X' || shown === 'Z' ? shown : null, layout.layout.depth ?? null);
+    const along = diagonalOnScreen(screen);
+    if (along && diagonal && diagonal.main !== 'Y') {
+      // Режим 45°: лінія основної осі на джойстику — вздовж діагоналі (туди, куди точка піде на екрані).
+      const l = Math.hypot(along.x, along.y);
+      stick.setAxes({ ...layout.dirs, [diagonal.main]: { x: along.x / l, y: along.y / l } }, diagonal.main, null);
+    } else {
+      stick.setAxes(controller.dirs ?? layout.dirs, shown === 'X' || shown === 'Z' ? shown : null, layout.layout.depth ?? null);
+    }
     const base = viewer.projectPoint(point);
     overlay.hidden = !base.visible;
     if (!base.visible) return;
     const longest = Math.max(...AXES.map((a) => Math.hypot(screen[a].x, screen[a].y)));
     const locked = segmentAxis();
     const second = diagonal?.choice ?? null;
+    const forward = diagonalForward(screen);
+    const forwardLen = forward ? Math.hypot(forward.x, forward.y) : 0;
+    const diagVisible = !!forward && forwardLen > 0 && forwardLen >= longest * 0.15;
+    diagArrow.group.style.display = diagVisible ? '' : 'none';
+    if (forward && diagVisible) placeArrow(diagArrow, base, forward.x / forwardLen, forward.y / forwardLen, 22);
     for (const arrow of arrows) {
       let dir: Vec2 = screen[arrow.name];
       // Відрізок уже йде по цій осі: стрілка — в бік руху, геть від початку відрізка
@@ -508,27 +594,11 @@ export function createPointEditor(viewer: Viewer): PointEditor {
       const visible = len > 0 && len >= longest * 0.15;
       arrow.group.style.display = visible ? '' : 'none';
       if (!visible) continue;
-      const ux = dir.x / len;
-      const uy = dir.y / len;
-      const tipX = base.x + ux * ARROW_PX;
-      const tipY = base.y + uy * ARROW_PX;
-      // Без «хвоста» за точкою й з відступом від неї — місце виміру не закрите.
-      arrow.line.setAttribute('x1', String(base.x + ux * ARROW_GAP_PX));
-      arrow.line.setAttribute('y1', String(base.y + uy * ARROW_GAP_PX));
-      arrow.line.setAttribute('x2', String(tipX));
-      arrow.line.setAttribute('y2', String(tipY));
-      const side = 6;
-      const back = 12;
-      arrow.head.setAttribute(
-        'points',
-        `${tipX + ux * 4},${tipY + uy * 4} ${tipX - ux * back - uy * side},${tipY - uy * back + ux * side} ` +
-          `${tipX - ux * back + uy * side},${tipY - uy * back - ux * side}`,
-      );
-      arrow.text.setAttribute('x', String(tipX + ux * 16));
-      arrow.text.setAttribute('y', String(tipY + uy * 16 + 5));
-      const active = shown === arrow.name || second?.axis === arrow.name;
+      placeArrow(arrow, base, dir.x / len, dir.y / len);
+      // Режим 45° зі стрілкою діагоналі: стрілки осей лише підказують, з чого вона складається, — бліді.
+      const active = !diagVisible && (shown === arrow.name || second?.axis === arrow.name);
       arrow.group.classList.toggle('axis-arrow--active', active);
-      arrow.group.classList.toggle('axis-arrow--dim', shown !== null && !active);
+      arrow.group.classList.toggle('axis-arrow--dim', (shown !== null || diagVisible) && !active);
     }
   };
   const stopFrames = viewer.onFrame(drawArrows);

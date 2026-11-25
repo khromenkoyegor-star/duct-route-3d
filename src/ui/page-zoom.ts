@@ -20,6 +20,9 @@ const ZOOMED_SCALE = 1.02;
 const DOUBLE_TAP_MS = 350;
 const DOUBLE_TAP_PX = 40;
 
+/** Відступ плашки «сторінку збільшено» від країв видимої частини, px екрана. */
+const BANNER_MARGIN_PX = 8;
+
 const INTERACTIVE = 'button, a, input, select, textarea, label, [role="button"]';
 
 export interface PageZoomGuard {
@@ -78,10 +81,12 @@ export function installPageZoomGuard(root: HTMLElement): PageZoomGuard {
     html.classList.toggle('page-zoomed', isZoomed);
     banner.hidden = !isZoomed;
     if (!isZoomed || !viewport) return;
-    // Плашка — у лівому верхньому куті видимої частини, не збільшена разом зі сторінкою.
+    // Плашка — у лівому верхньому куті видимої частини, не збільшена разом зі сторінкою:
+    // відступ 8 px і ширина «екран − 16 px» — у пікселях екрана за будь-якого масштабу.
     const k = 1 / viewport.scale;
-    banner.style.transform = `translate(${viewport.offsetLeft}px, ${viewport.offsetTop}px) scale(${k})`;
-    banner.style.width = `${viewport.width * viewport.scale - 16}px`;
+    const margin = BANNER_MARGIN_PX * k;
+    banner.style.transform = `translate(${viewport.offsetLeft + margin}px, ${viewport.offsetTop + margin}px) scale(${k})`;
+    banner.style.width = `${Math.max(0, viewport.width * viewport.scale - 2 * BANNER_MARGIN_PX)}px`;
   };
 
   let resetTimer = 0;

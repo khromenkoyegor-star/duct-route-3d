@@ -467,13 +467,7 @@ test.describe('Етап 4.1 (tester): сторінку все ж збільше�
   ]) {
     test(`масштаб ${zoom.scale}: плашка звичайного розміру цілком у видимій частині, кнопка ≥ 44 px; програма сама пробує повернути масштаб; масштаб 1 — плашки немає`, async ({
       page,
-    }, testInfo) => {
-      test.fail(
-        testInfo.project.name === 'iPhone 15 Pro Max' && zoom.scale > 2,
-        'Помилка програми (дрібна): page-zoom.ts sync() — ширина плашки = видима ширина − 16 px екрана, а відступ зліва ' +
-          '8 px CSS (style.css .zoom-banner) масштабується разом зі сторінкою; на iPhone вертикально при масштабі > 2 плашка ' +
-          'виходить за правий край (на 2,5× — на 4 px, на 5× — ≈ 24 px), кнопка «Повернути» підрізана.',
-      );
+    }) => {
       await page.addInitScript(installFakeViewport);
       await startPull(page);
       const metaBefore = (await bannerGeometry(page)).meta;
@@ -612,7 +606,8 @@ test.describe('Етап 4.1 (tester): камера їде за точкою', ()
 
   test('«Орто»: тягнуть по X 9 с — точка у видимій частині, вид і масштаб ті самі, без ривка', async ({ page }) => {
     test.setTimeout(60_000);
-    await startPull(page, undefined, { x: 1.2, y: 2.6, z: 4.6 }, { x: -0.3, y: 0.3, z: 0.3 });
+    // Камера ближче: без перспективи точка на екрані не «росте», а на широкому iPad за 9 с має дійти до краю.
+    await startPull(page, undefined, { x: 0.4, y: 1.7, z: 2.6 }, { x: -0.5, y: 0.2, z: 0.3 });
     await page.getByTestId('view-ortho').click();
     await frames(page);
     const d = await stickDir(page, 'X');
@@ -811,13 +806,9 @@ test.describe('Етап 4.1 (tester): «45°» в інтерфейсі', () => {
     expect(Math.abs(Math.abs(p.x - a.x) - Math.abs(p.y - a.y))).toBeLessThan(0.5);
   });
 
-  // Помилка програми (UX), див. звіт: у режимі 45° джойстик рахує хід лише за проєкцією на стрілку ОСНОВНОЇ осі
-  // (point-editor.ts → integrate() → controller.update(..., only = diagonal.main)), а не за напрямком діагоналі на екрані.
-  const DIAGONAL_STICK_BUG =
-    'Помилка програми (UX): на діагоналі джойстик веде точку лише за проєкцією на стрілку основної осі, а не вздовж діагоналі на екрані';
-
+  // Була помилка програми (UX): у режимі 45° джойстик рахував хід лише за стрілкою ОСНОВНОЇ осі, а не за напрямком
+  // діагоналі на екрані. Виправлено: джойстик веде вздовж діагоналі, біля точки — одна стрілка «45°».
   test('на діагоналі джойстик у бік діагоналі на екрані веде точку не повільніше, ніж по осі (≥ 50 %)', async ({ page }) => {
-    test.fail(true, DIAGONAL_STICK_BUG);
     // Камера з кута +X+Z: стрілки X+ і Z+ на екрані — під тупим кутом.
     await startPull(page, { x: -1.2, y: 0, z: -0.8 }, { x: 6, y: 4, z: 6 }, { x: 0, y: 0.6, z: 0 });
     const s0: P3 = (await editor(page)).point;
@@ -838,19 +829,46 @@ test.describe('Етап 4.1 (tester): «45°» в інтерфейсі', () => {
     expect(diagTravel / axisTravel, `по діагоналі ${(diagTravel * 1000).toFixed(1)} мм, по осі ${(axisTravel * 1000).toFixed(1)} мм за той самий час`).toBeGreaterThan(0.5);
   });
 
-  test('на діагоналі X+Z+ джойстик у бік підсвіченої стрілки Z+ веде точку до Z+ (а не назад)', async ({ page }) => {
-    test.fail(true, DIAGONAL_STICK_BUG);
+  test('на діагоналі X+Z+ біля точки — одна стрілка «45°» уздовж діагоналі; джойстик у її бік веде вперед, у бік блідої Z+ — не назад', async ({
+    page,
+  }) => {
     await startPull(page, { x: -1.2, y: 0, z: -0.8 }, { x: 6, y: 4, z: 6 }, { x: 0, y: 0.6, z: 0 });
     await pull(page, 'X', 1, 500);
     await choose45(page, 'z-plus');
+    await frames(page, 2);
     const e0 = await editor(page);
+    // Сценарій: стрілки X+ і Z+ на екрані під тупим кутом (камера з кута +X+Z).
     const dz = await screenDir(page, 'Z');
     const dx = await screenDir(page, 'X');
-    // Сценарій: стрілки X+ і Z+ на екрані під тупим кутом (камера з кута +X+Z).
-    const cos = dx.x * dz.x + dx.y * dz.y;
-    await hold(page, 'stick-xz', 0.9 * dz.x, 0.9 * dz.y, 500);
+    expect(dx.x * dz.x + dx.y * dz.y, 'стрілки X+ і Z+ мали бути під тупим кутом').toBeLessThan(-0.3);
+    // Напрямок діагоналі на екрані: від точки до точки +0,3 м по X і по Z.
+    const a = await project(page, e0.point);
+    const b = await project(page, { x: e0.point.x + 0.3, y: e0.point.y, z: e0.point.z + 0.3 });
+    const dl = Math.hypot(b.x - a.x, b.y - a.y);
+    const diag = { x: (b.x - a.x) / dl, y: (b.y - a.y) / dl };
+    // Стрілка «45°» видна й показує саме туди; стрілки осей бліді; лінія на джойстику — так само.
+    const arrow = await page.getByTestId('axis-arrow-45').evaluate((g) => {
+      const l = g.querySelector('line')!;
+      const n = (k: string) => Number(l.getAttribute(k));
+      return { display: (g as SVGGElement).style.display, x: n('x2') - n('x1'), y: n('y2') - n('y1') };
+    });
+    expect(arrow.display).toBe('');
+    const al = Math.hypot(arrow.x, arrow.y);
+    expect((arrow.x / al) * diag.x + (arrow.y / al) * diag.y, 'стрілка «45°» не вздовж діагоналі').toBeGreaterThan(0.999);
+    for (const name of ['x', 'z']) {
+      await expect(page.locator(`.axis-arrow--${name}`)).toHaveClass(/axis-arrow--dim/);
+    }
+    const guide = await stickDir(page, 'X');
+    expect(guide.x * diag.x + guide.y * diag.y, 'лінія на джойстику не вздовж діагоналі').toBeGreaterThan(0.999);
+    // Джойстик у бік стрілки «45°» — точка вперед по діагоналі (X і Z ростуть однаково).
+    await hold(page, 'stick-xz', 0.9 * diag.x, 0.9 * diag.y, 500);
     const e1 = await editor(page);
-    expect(e1.point.z - e0.point.z, `Z мала збільшитись (кут між стрілками X+ і Z+: cos = ${cos.toFixed(2)})`).toBeGreaterThan(0.02);
+    expect(e1.point.z - e0.point.z, 'Z мала збільшитись').toBeGreaterThan(0.02);
+    expect(Math.abs(offset(e1.segment.anchor, e1.point).x - offset(e1.segment.anchor, e1.point).z)).toBeLessThan(TOL_M);
+    // У бік блідої стрілки Z+ — точка точно не йде назад.
+    await hold(page, 'stick-xz', 0.9 * dz.x, 0.9 * dz.y, 500);
+    const e2 = await editor(page);
+    expect(e2.point.z, 'у бік стрілки Z+ точка пішла назад').toBeGreaterThanOrEqual(e1.point.z);
   });
 });
 

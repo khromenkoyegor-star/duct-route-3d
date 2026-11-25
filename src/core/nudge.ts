@@ -233,6 +233,36 @@ export function createStickController(): StickController {
   };
 }
 
+/**
+ * Режим 45°: куди на екрані рухається точка, коли основна координата зростає. По діагоналі разом
+ * з основною змінюється й друга координата (рівно на стільки ж, у вибраний бік), тож на екрані точка
+ * йде не вздовж стрілки основної осі, а вздовж суми двох стрілок.
+ * `main`, `second` — стрілки осей на екрані (px на одиницю); `mainSide` — з якого боку від початку
+ * відрізка точка по основній осі; `secondSign` — вибраний бік другої осі.
+ * Якщо діагональ дивиться майже «в камеру» (на екрані — майже точка), джойстик угору веде точку
+ * геть від початку відрізка.
+ */
+export function diagonalScreenDirection(main: Vec2, second: Vec2, mainSide: 1 | -1, secondSign: 1 | -1): Vec2 {
+  const k = mainSide * secondSign;
+  const dir = { x: main.x + k * second.x, y: main.y + k * second.y };
+  const longest = Math.max(length(main), length(second));
+  if (!(longest > 0) || !Number.isFinite(longest) || !(length(dir) >= longest * DEGENERATE_AXIS_RATIO)) {
+    return { x: 0, y: -mainSide };
+  }
+  return dir;
+}
+
+/**
+ * Режим 45°: крок по основній осі за кадр (мм, зі знаком) — від проєкції джойстика на напрямок
+ * діагоналі на екрані (див. diagonalScreenDirection). Швидкість по основній осі — та сама, що й без 45°.
+ */
+export function diagonalStep(stick: Vec2, onScreen: Vec2, dtS: number): number {
+  if (!Number.isFinite(stick.x) || !Number.isFinite(stick.y)) return 0;
+  const velocity = axisVelocity(stick, onScreen);
+  const dt = safeDt(dtS);
+  return velocity === 0 || dt === 0 ? 0 : velocity * dt;
+}
+
 /** Один кадр повзунка Y. */
 export function sliderStep(value: number, dtS: number): NudgeStep | null {
   const velocity = sliderVelocity(value);

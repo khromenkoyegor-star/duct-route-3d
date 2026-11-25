@@ -65,6 +65,20 @@ async function pull(page: Page, axis: Axis, sign: 1 | -1, ms = 500) {
   await hold(page, 'stick-xz', (sign * 0.9 * dir.x) / len, (sign * 0.9 * dir.y) / len, ms);
 }
 
+/**
+ * Режим 45°: потягнути джойстик уздовж діагоналі так, як вона йде на екрані
+ * (sign 1 — геть від початку відрізка, −1 — до нього).
+ */
+async function pullDiagonal(page: Page, sign: 1 | -1, ms = 500) {
+  const e = await editor(page);
+  const [a, p] = await page.evaluate(
+    ([anchor, point]) => [window.__trasa!.viewer.projectPoint(anchor!), window.__trasa!.viewer.projectPoint(point!)],
+    [e.segment.anchor as P3, e.point as P3] as const,
+  );
+  const len = Math.hypot(p!.x - a!.x, p!.y - a!.y);
+  await hold(page, 'stick-xz', (sign * 0.9 * (p!.x - a!.x)) / len, (sign * 0.9 * (p!.y - a!.y)) / len, ms);
+}
+
 /** Потягнути джойстик по осі X чи Z і, не відпускаючи, прочитати підказку біля джойстика. */
 async function pullAndRead(page: Page, axis: 'X' | 'Z', sign: 1 | -1, ms = 400): Promise<string> {
   const point: P3 = (await editor(page)).point;
@@ -257,18 +271,17 @@ test.describe('Поворот 45° під час побудови траси', (
     await expect(shown(page, 'segment-45')).toHaveAttribute('aria-pressed', 'false');
     await expect(shown(page, 'point-shift')).toHaveText(/^Відрізок: Z −/);
 
-    // Діагональ, потім точку тягнуть назад через початок відрізка: там режим 45° скидається,
-    // і після короткої зупинки точка їде далі вже прямо по Z+ (без зміщення по X).
+    // Діагональ, потім точку тягнуть джойстиком назад уздовж діагоналі через початок відрізка: там режим 45°
+    // скидається, і після короткої зупинки точка може йти далі лише прямо по одній осі (без діагоналі).
     await choose45(page, 'x-minus');
     expect((await editor(page)).segment.diagonal).toEqual({ axis: 'X', sign: -1 });
-    await pull(page, 'Z', 1, 2500);
+    await pullDiagonal(page, -1, 2500);
     e = await editor(page);
     expect(e.segment.diagonal).toBeNull();
-    expect(e.point.x).toBe(anchor.x);
-    expect(e.point.y).toBe(anchor.y);
-    expect(e.point.z).toBeGreaterThan(anchor.z);
+    const moved = (['x', 'y', 'z'] as const).filter((k) => e.point[k] !== anchor[k]);
+    expect(moved.length, `змінились координати: ${moved.join(', ')}`).toBeLessThanOrEqual(1);
     await expect(shown(page, 'segment-45')).toHaveAttribute('aria-pressed', 'false');
-    await expect(shown(page, 'point-shift')).toHaveText(/^Відрізок: Z \+/);
+    await expect(shown(page, 'point-shift')).not.toHaveText(/45°/);
   });
 
   test('між відрізками — лише 45° або 90°: заборонені варіанти неактивні, у заборонений бік точка не йде', async ({ page }) => {
