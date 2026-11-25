@@ -14,7 +14,7 @@ import {
   ScanLoadError,
   type ScanFile,
 } from '../scene/scan-loader';
-import type { Viewer } from '../scene/viewer';
+import type { Projection, Viewer } from '../scene/viewer';
 import { type DuctProblem, type DuctSpec, ductLayout, formatSection, pickDuctSegment, sectionsBySegment } from '../core/duct';
 import { formatPointCount, type RouteSet, toM, toMm } from '../core/route';
 import { mmToM, mToMm } from '../core/units';
@@ -40,6 +40,8 @@ export interface AppState {
   routes: RouteToolState;
   /** Увімкнений інструмент. */
   tool: ToolName;
+  /** Проекція камери: з перспективою чи ортогональна (кнопка «Орто»). */
+  projection: Projection;
   /** Повітропроводи: показ, прозорість скану, вибір у панелі, розміри й проблеми трас. */
   ducts: DuctsState;
   /** Остання помилка відкриття (для тестів). */
@@ -110,6 +112,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       editor: closedEditorState(),
     },
     tool: 'none',
+    projection: 'perspective',
     ducts: { mode: 'both', transparency: 0, selection: null, routes: [], triangles: 0, builds: 0, meshes: 0 },
     error: null,
   };
@@ -131,7 +134,14 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         ? viewer.viewAlong(axis, editing.point, freeAreaCenter() ?? undefined)
         : viewer.viewAlong(axis);
     viewBar.setActive(axis, side);
-  }, () => viewer.showAll('current'));
+  }, () => viewer.showAll('current'), () => {
+    // «Орто»: якщо зараз доводять точку — саме вона лишається того самого розміру на екрані.
+    const next: Projection = viewer.projection === 'ortho' ? 'perspective' : 'ortho';
+    const editing = editor.state;
+    viewer.setProjection(next, editing.active && editing.point ? editing.point : undefined);
+    state.projection = next;
+    viewBar.setProjection(next);
+  });
   // Камеру повернули рукою — вид уже не «строго вздовж осі».
   viewer.onUserCamera(() => viewBar.setActive(null));
   const progress = createProgress();

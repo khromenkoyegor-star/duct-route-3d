@@ -183,21 +183,23 @@ function rectFrustum(b: Builder, from: P3, to: P3, frame: Frame, s1: DuctSection
 function rectElbow(b: Builder, elbow: DuctElbow, grow: number): void {
   const s = elbow.section;
   if (s.shape !== 'rect') return;
-  // Яка сторона рамки — у площині повороту (дивиться у напрямку виходу).
-  const uInPlane = Math.abs(dot(elbow.frameIn.u, elbow.dirOut)) > 0.5;
+  // Яка сторона рамки — у площині повороту (дивиться до центру дуги).
+  const uInPlane = Math.abs(dot(elbow.frameIn.u, elbow.inward)) >= Math.abs(dot(elbow.frameIn.v, elbow.inward));
   const across = uInPlane ? elbow.frameIn.v : elbow.frameIn.u;
   const half = halfSizes(s, grow);
   const hb = uInPlane ? half.hu : half.hv;
   const ha = uInPlane ? half.hv : half.hu;
-  // У площині повороту: напрямок до центру дуги W(θ) = dirOut·cos θ − dirIn·sin θ.
-  const section = (theta: number) => {
-    const c = elbowArcPoint(elbow, theta);
-    const w = sub(scale(elbow.dirOut, Math.cos(theta)), scale(elbow.dirIn, Math.sin(theta)));
+  // У площині повороту: напрямок до центру дуги W(φ) = inward·cos φ − dirIn·sin φ.
+  const section = (phi: number) => {
+    const c = elbowArcPoint(elbow, phi);
+    const w = sub(scale(elbow.inward, Math.cos(phi)), scale(elbow.dirIn, Math.sin(phi)));
     return { c, w };
   };
-  for (let j = 0; j < ARC_STEPS; j++) {
-    const t0 = (j / ARC_STEPS) * (Math.PI / 2);
-    const t1 = ((j + 1) / ARC_STEPS) * (Math.PI / 2);
+  // Кроків по дузі — пропорційно куту коліна (24 на 90°, 12 на 45°).
+  const steps = Math.max(4, Math.round((ARC_STEPS * elbow.angleRad) / (Math.PI / 2)));
+  for (let j = 0; j < steps; j++) {
+    const t0 = (j / steps) * elbow.angleRad;
+    const t1 = ((j + 1) / steps) * elbow.angleRad;
     const A = section(t0);
     const B = section(t1);
     const pt = (sec: { c: P3; w: P3 }, sw: number, sa: number) => add(sec.c, add(scale(sec.w, sw * hb), scale(across, sa * ha)));

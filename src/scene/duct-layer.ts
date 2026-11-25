@@ -81,8 +81,9 @@ export function createDuctLayer(viewer: Viewer): DuctLayer {
     mesh.name = `duct-${route.id}`;
     group.add(mesh);
     let problems: Mesh | null = null;
-    if (layout.problems.length > 0) {
-      const segments = new Set(layout.problems.map((p) => p.segment));
+    if (layout.problems.length > 0 || layout.oblique.length > 0) {
+      // Закороткі відрізки й відрізки біля повороту «не в площині сторін» прямокутної труби.
+      const segments = new Set([...layout.problems.map((p) => p.segment), ...layout.oblique]);
       problems = new Mesh(buildDuctGeometry(route.nodes, layout, { segments, grow: HIGHLIGHT_GROW_MM }), problemMaterial);
       problems.renderOrder = 1;
       group.add(problems);

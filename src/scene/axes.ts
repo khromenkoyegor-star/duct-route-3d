@@ -42,8 +42,11 @@ export interface Axes {
   /** Точка, де стоїть підпис осі (у метрах сцени) — для тестів і майбутніх підказок. */
   labelPosition(name: AxisName): Vector3;
   setTheme(theme: SceneTheme): void;
-  /** Висота кадру (px) і кут огляду камери (°) — щоб підписи були ≈ 18 px на будь-якому екрані. */
-  setScreen(heightPx: number, fovDeg: number): void;
+  /**
+   * Висота кадру (px) і кут огляду камери (°) — щоб підписи були ≈ 18 px на будь-якому екрані.
+   * `orthoDistanceM` — для ортогональної проекції: відстань камери до цілі, м (вона задає масштаб кадру).
+   */
+  setScreen(heightPx: number, fovDeg: number, orthoDistanceM?: number): void;
   dispose(): void;
 }
 
@@ -139,9 +142,12 @@ export function createAxes(theme: SceneTheme): Axes {
       const part = parts.find((p) => p.name === name);
       return part ? part.label.getWorldPosition(new Vector3()) : new Vector3();
     },
-    setScreen(heightPx, fovDeg) {
+    setScreen(heightPx, fovDeg, orthoDistanceM) {
       // Спрайт без зменшення з відстанню: висота на екрані = scale · H / (2 · tan(fov/2)).
-      const scale = (LABEL_PX * 2 * Math.tan((fovDeg * Math.PI) / 360)) / Math.max(1, heightPx);
+      // В ортогональній проекції розмір спрайта — у метрах сцени, а висота кадру = 2 · d · tan(fov/2) м.
+      const perspective = (LABEL_PX * 2 * Math.tan((fovDeg * Math.PI) / 360)) / Math.max(1, heightPx);
+      const scale = orthoDistanceM === undefined ? perspective : perspective * Math.max(orthoDistanceM, 1e-4);
+      if (parts[0]?.label.scale.x === scale) return;
       for (const part of parts) part.label.scale.set(scale, scale, 1);
     },
     setTheme(next) {

@@ -6,6 +6,7 @@ import {
   type Material,
   type Mesh,
   type Object3D,
+  OrthographicCamera,
   PMREMGenerator,
   PerspectiveCamera,
   Quaternion,
@@ -51,6 +52,9 @@ export interface ProjectedPath {
   nodes: Array<ScreenPoint & { visible: boolean }>;
   segments: Array<[ScreenPoint, ScreenPoint] | null>;
 }
+
+/** Проекція: з перспективою (як бачить око) або ортогональна — без перспективи, як на кресленні. */
+export type Projection = 'perspective' | 'ortho';
 
 export interface ViewSnapshot {
   position: Vector3;
@@ -111,6 +115,19 @@ export interface Viewer {
    * наприклад, у вільну від панелей частину екрана (інакше — у весь кадр).
    */
   fitPoints(points: readonly Vec3Like[], area?: { left: number; right: number; top: number; bottom: number }): void;
+  /**
+   * Тримати точку (м) в прямокутнику екрана `area` (CSS px): якщо вона вийшла за нього, камера й ціль
+   * зсуваються паралельно екрану — без повороту й без зміни масштабу — рівно настільки, щоб точка
+   * стала на його край. Для точки, яку тягнуть джойстиком: камера «їде» за нею. true — камеру зсунуто.
+   */
+  followPoint(point: Vec3Like, area: { left: number; right: number; top: number; bottom: number }): boolean;
+  /**
+   * Перемкнути проекцію. Ортогональна — паралельні лінії лишаються паралельними, розміри не залежать
+   * від відстані. Вигляд не «стрибає»: те, на що дивляться, лишається того самого розміру на екрані —
+   * точка `around` (наприклад, та, яку зараз доводять), а без неї — поверхня скану в центрі кадру.
+   */
+  setProjection(projection: Projection, around?: Vec3Like): void;
+  readonly projection: Projection;
   /** Запам'ятати положення камери (наприклад, у момент натискання). */
   snapshotView(): ViewSnapshot;
   /** Повернути камеру в запам'ятоване положення й зупинити інерцію. */
@@ -167,6 +184,17 @@ export function createViewer(container: HTMLElement): Viewer {
   const camera = new PerspectiveCamera(50, 1, 0.01, 1000);
   camera.up.set(0, 1, 0); // вертикаль — Y
 
+  // Ортогональна проекція (етап 4.1). «Логічна» камера завжди перспективна: нею керують жести,
+  // «Показати все», види X/Y/Z. Ортогональну щоразу виводимо з неї: той самий напрямок погляду,
+  // а видима висота кадру — як у перспективної на відстані до цілі. Тож зум (відстань до цілі)
+  // працює в обох проекціях однаково, а перемикання не змінює розмір того, на що дивляться.
+  // Стоїть там само, де логічна, з тими самими межами по глибині: видно те саме, що й з перспективою
+  // (зсередини кімнати стіна за спиною не закриває вид), лише без перспективного спотворення.
+  const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
+  let projection: Projection = 'perspective';
+  let lastWidth = 0;
+  let lastHeight = 0;
+
   let grid = makeGrid(theme);
   scene.add(grid);
 
@@ -197,6 +225,42 @@ export function createViewer(container: HTMLElement): Viewer {
   };
   controls.addEventListener('change', requestRender);
 
+  /** Половина висоти кадру (м) на відстані до цілі — масштаб ортогональної проекції. */
+  const halfHeightAtTarget = () =>
+    Math.max(camera.position.distanceTo(controls.target), 1e-4) * Math.tan((camera.fov * Math.PI) / 360);
+
+  /** Камера, якою зараз малюємо й проєктуємо (ортогональна оновлюється з логічної). */
+  function view(): PerspectiveCamera | OrthographicCamera {
+    camera.updateMatrixWorld();
+    if (projection === 'perspective') return camera;
+    const halfH = halfHeightAtTarget();
+    const halfW = halfH * camera.aspect;
+    orthoCamera.left = -halfW;
+    orthoCamera.right = halfW;
+    orthoCamera.top = halfH;
+    orthoCamera.bottom = -halfH;
+    orthoCamera.position.copy(camera.position);
+    orthoCamera.quaternion.copy(camera.quaternion);
+    orthoCamera.near = camera.near;
+    orthoCamera.far = camera.far;
+    orthoCamera.updateProjectionMatrix();
+    orthoCamera.updateMatrixWorld();
+    return orthoCamera;
+  }
+
+  /** Підписи осей сцени — сталого розміру на екрані в обох проекціях. */
+  function updateAxisLabels(): void {
+    const distance = projection === 'ortho' ? camera.position.distanceTo(controls.target) : undefined;
+    axes.setScreen(Math.max(1, lastHeight), camera.fov, distance);
+  }
+
+  /** Скільки метрів сцени в одному CSS-пікселі на глибині `depth` (м) від камери `view()`. */
+  function metresPerPixel(depth: number): number {
+    const height = Math.max(1, canvas.getBoundingClientRect().height);
+    const half = projection === 'ortho' ? halfHeightAtTarget() : Math.max(0, depth) * Math.tan((camera.fov * Math.PI) / 360);
+    return (2 * half) / height;
+  }
+
   /** Кут огляду по меншій стороні кадру (рад): по висоті — горизонтально, по ширині — вертикально. */
   function fitAngle(): number {
     const vFov = (camera.fov * Math.PI) / 180;
@@ -214,8 +278,6 @@ export function createViewer(container: HTMLElement): Viewer {
     requestRender();
   }
 
-  let lastWidth = 0;
-  let lastHeight = 0;
   function resize(): void {
     const width = Math.max(1, Math.round(container.clientWidth));
     const height = Math.max(1, Math.round(container.clientHeight));
@@ -227,7 +289,7 @@ export function createViewer(container: HTMLElement): Viewer {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    axes.setScreen(height, camera.fov);
+    updateAxisLabels();
     if (firstLayout) {
       resetView();
     } else {
@@ -346,7 +408,8 @@ export function createViewer(container: HTMLElement): Viewer {
     }
     if (moved || needsRender) {
       needsRender = false;
-      renderer.render(scene, camera);
+      if (projection === 'ortho') updateAxisLabels();
+      renderer.render(scene, view());
       lastPosition.copy(camera.position);
       lastQuaternion.copy(camera.quaternion);
       frameCount += 1;
@@ -357,8 +420,9 @@ export function createViewer(container: HTMLElement): Viewer {
   function projectPoint(point: Vec3Like): ScreenPoint & { visible: boolean } {
     const rect = canvas.getBoundingClientRect();
     const world = new Vector3(point.x, point.y, point.z);
-    const visible = world.clone().applyMatrix4(camera.matrixWorldInverse).z < 0;
-    const ndc = world.project(camera);
+    const cam = view();
+    const visible = world.clone().applyMatrix4(cam.matrixWorldInverse).z < 0;
+    const ndc = world.project(cam);
     return {
       x: rect.left + ((ndc.x + 1) / 2) * rect.width,
       y: rect.top + ((1 - ndc.y) / 2) * rect.height,
@@ -369,17 +433,18 @@ export function createViewer(container: HTMLElement): Viewer {
   function projectPath(points: readonly Vec3Like[]): ProjectedPath {
     const rect = canvas.getBoundingClientRect();
     // Трохи далі за найближчу площину камери, щоб точка на ній не «вилітала» в нескінченність.
-    const clipZ = -camera.near * 1.01;
-    const view = points.map((p) => new Vector3(p.x, p.y, p.z).applyMatrix4(camera.matrixWorldInverse));
+    const cam = view();
+    const clipZ = -cam.near * 1.01;
+    const inView = points.map((p) => new Vector3(p.x, p.y, p.z).applyMatrix4(cam.matrixWorldInverse));
     const toScreen = (v: Vector3): ScreenPoint => {
-      const ndc = v.clone().applyMatrix4(camera.projectionMatrix);
+      const ndc = v.clone().applyMatrix4(cam.projectionMatrix);
       return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
     };
-    const nodes = view.map((v) => ({ ...toScreen(v), visible: v.z < clipZ }));
+    const nodes = inView.map((v) => ({ ...toScreen(v), visible: v.z < clipZ }));
     const segments: ProjectedPath['segments'] = [];
-    for (let i = 1; i < view.length; i++) {
-      let a = view[i - 1]!;
-      let b = view[i]!;
+    for (let i = 1; i < inView.length; i++) {
+      let a = inView[i - 1]!;
+      let b = inView[i]!;
       const aIn = a.z < clipZ;
       const bIn = b.z < clipZ;
       if (!aIn && !bIn) {
@@ -447,8 +512,7 @@ export function createViewer(container: HTMLElement): Viewer {
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return null;
       pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
-      camera.updateMatrixWorld();
-      raycaster.setFromCamera(pointer, camera);
+      raycaster.setFromCamera(pointer, view());
       const hit = raycaster.intersectObject(scanGroup, true)[0];
       return hit ? hit.point.clone() : null;
     },
@@ -492,6 +556,62 @@ export function createViewer(container: HTMLElement): Viewer {
       controls.update();
       requestRender();
     },
+    followPoint(point, area) {
+      if (!(area.right >= area.left) || !(area.bottom >= area.top)) return false;
+      const cam = view();
+      const depth = -new Vector3(point.x, point.y, point.z).applyMatrix4(cam.matrixWorldInverse).z;
+      // Точка за камерою — паралельним зсувом її не показати (це робить centerOn після відпускання).
+      if (!(depth > cam.near)) return false;
+      const screen = projectPoint(point);
+      const dx = screen.x - Math.min(Math.max(screen.x, area.left), area.right);
+      const dy = screen.y - Math.min(Math.max(screen.y, area.top), area.bottom);
+      if (dx === 0 && dy === 0) return false;
+      const metresPerPx = metresPerPixel(depth);
+      const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      // Камера вправо — точка на екрані вліво; камера вгору — точка вниз.
+      const shift = right.multiplyScalar(dx * metresPerPx).add(up.multiplyScalar(-dy * metresPerPx));
+      camera.position.add(shift);
+      controls.target.add(shift);
+      controls.update();
+      requestRender();
+      return true;
+    },
+    setProjection(next, around) {
+      if (next === projection) return;
+      flushInertia();
+      camera.updateMatrixWorld();
+      // Щоб вигляд не «стрибнув»: те, що видно в центрі кадру, має лишитись того самого розміру.
+      // Масштаб ортогональної проекції задає відстань до цілі, тож ставимо ціль на поверхню в центрі кадру.
+      const forward = camera.getWorldDirection(new Vector3());
+      const distance = camera.position.distanceTo(controls.target);
+      let anchor: Vector3 | null = around ? new Vector3(around.x, around.y, around.z) : null;
+      if (!anchor && scanGroup.children.length > 0) {
+        pointer.set(0, 0);
+        raycaster.setFromCamera(pointer, view());
+        anchor = raycaster.intersectObject(scanGroup, true)[0]?.point ?? null;
+      }
+      if (anchor) {
+        // Глибина «того, на що дивляться» вздовж погляду; сама точка може бути й не в центрі кадру.
+        const depth = anchor.sub(camera.position).dot(forward);
+        if (next === 'ortho') {
+          // Перспектива → орто: камера на місці, ціль — на цій глибині (якщо вона попереду камери).
+          if (depth > controls.minDistance) controls.target.copy(camera.position).addScaledVector(forward, depth);
+        } else {
+          // Орто → перспектива: камера стає на ту відстань від цієї глибини, якою був заданий масштаб.
+          controls.target.copy(camera.position).addScaledVector(forward, depth);
+          camera.position.copy(controls.target).addScaledVector(forward, -distance);
+        }
+      }
+      projection = next;
+      camera.lookAt(controls.target);
+      controls.update();
+      updateAxisLabels();
+      requestRender();
+    },
+    get projection() {
+      return projection;
+    },
     snapshotView() {
       return { position: camera.position.clone(), target: controls.target.clone() };
     },
@@ -508,6 +628,23 @@ export function createViewer(container: HTMLElement): Viewer {
       // Камера лишається на місці й лише повертається («як голова») — так вона ніколи не пройде
       // крізь підлогу чи стіну, на відміну від зсуву.
       flushInertia();
+      if (projection === 'ortho') {
+        // Без перспективи поворот «головою» нічого не наближає й збиває вид уздовж осі —
+        // тож зсуваємо камеру паралельно, напрямок погляду не змінюється.
+        const rect = canvas.getBoundingClientRect();
+        const screen = projectPoint(point);
+        const goal = at ?? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        const scale = metresPerPixel(0);
+        const shift = new Vector3()
+          .setFromMatrixColumn(camera.matrixWorld, 0)
+          .multiplyScalar((screen.x - goal.x) * scale)
+          .addScaledVector(new Vector3().setFromMatrixColumn(camera.matrixWorld, 1), -(screen.y - goal.y) * scale);
+        camera.position.add(shift);
+        controls.target.add(shift);
+        controls.update();
+        requestRender();
+        return;
+      }
       const p = new Vector3(point.x, point.y, point.z);
       const distance = Math.max(camera.position.distanceTo(p), 0.01);
       camera.lookAt(p);
@@ -598,15 +735,13 @@ export function createViewer(container: HTMLElement): Viewer {
       requestRender();
     },
     metresPerPixelAt(distance) {
-      const height = Math.max(1, canvas.getBoundingClientRect().height);
-      return (2 * Math.max(0, distance) * Math.tan((camera.fov * Math.PI) / 360)) / height;
+      return metresPerPixel(distance);
     },
     screenRay(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return null;
       pointer.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
-      camera.updateMatrixWorld();
-      raycaster.setFromCamera(pointer, camera);
+      raycaster.setFromCamera(pointer, view());
       const { origin, direction } = raycaster.ray;
       return { origin: { x: origin.x, y: origin.y, z: origin.z }, direction: { x: direction.x, y: direction.y, z: direction.z } };
     },

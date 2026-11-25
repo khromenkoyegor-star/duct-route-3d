@@ -19,10 +19,18 @@ export interface Stick {
   readonly value: Vec2;
   /** Чи тримають зараз джойстик. */
   readonly active: boolean;
-  /** Стрілки осей на колі джойстика (лише для 2D) і вісь, по якій зараз рух. */
-  setAxes(dirs: Record<HorizontalAxis, Vec2> | null, active: HorizontalAxis | null, depth?: HorizontalAxis | null): void;
-  /** Вісь, яку показує «кулька» під час руху (колір і літера). */
-  setKnobAxis(axis: 'X' | 'Y' | 'Z' | null): void;
+  /**
+   * Стрілки осей на колі джойстика (лише для 2D) і вісь, по якій зараз рух.
+   * `diagonal` — режим 45°: лінія `active` — це діагональ (помаранчева, підпис «45°»), друга лінія схована.
+   */
+  setAxes(
+    dirs: Record<HorizontalAxis, Vec2> | null,
+    active: HorizontalAxis | null,
+    depth?: HorizontalAxis | null,
+    diagonal?: boolean,
+  ): void;
+  /** Вісь, яку показує «кулька» під час руху (колір і літера); «45°» — рух по діагоналі. */
+  setKnobAxis(axis: 'X' | 'Y' | 'Z' | '45°' | null): void;
   dispose(): void;
 }
 
@@ -175,11 +183,17 @@ export function createStick(options: StickOptions): Stick {
     get active() {
       return pointerId !== null;
     },
-    setAxes(dirs, activeAxis, depth = null) {
+    setAxes(dirs, activeAxis, depth = null, diagonal = false) {
       if (!guides) return;
       guides.style.display = dirs ? '' : 'none';
       if (!dirs) return;
+      const diag = diagonal && activeAxis !== null;
       for (const [axis, part] of guideParts) {
+        const hidden = diag && activeAxis !== axis;
+        part.line.style.display = hidden ? 'none' : '';
+        part.text.style.display = hidden ? 'none' : '';
+        part.line.classList.toggle('stick-guide--diag', diag && activeAxis === axis);
+        part.text.classList.toggle('stick-guide--diag', diag && activeAxis === axis);
         const d = dirs[axis];
         const r = 50;
         part.line.setAttribute('x1', String(-d.x * r));
@@ -194,11 +208,11 @@ export function createStick(options: StickOptions): Stick {
         // Вісь, що дивиться в камеру: рух по ній — углиб екрана, тому вона приглушена й підписана «⊙».
         part.line.classList.toggle('stick-guide--depth', depth === axis);
         part.text.classList.toggle('stick-guide--depth', depth === axis);
-        part.text.textContent = depth === axis ? `${axis}⊙` : axis;
+        part.text.textContent = diag && activeAxis === axis ? '45°' : depth === axis ? `${axis}⊙` : axis;
       }
     },
     setKnobAxis(axis) {
-      knob.dataset.axis = axis ?? '';
+      knob.dataset.axis = axis === '45°' ? '45' : (axis ?? '');
       knob.textContent = axis ?? '';
     },
     dispose() {

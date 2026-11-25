@@ -192,3 +192,36 @@ describe('осі сцени: звільнення пам\'яті (dispose)', () 
     for (const t of textures) expect(disposed.has(t)).toBe(true);
   });
 });
+
+describe('осі сцени: підписи в ортогональній проекції (етап 4.1)', () => {
+  const labelScale = (axes: ReturnType<AxesModule['createAxes']>) => {
+    const sprites: Sprite[] = [];
+    axes.group.traverse((o) => {
+      if (o instanceof Sprite) sprites.push(o);
+    });
+    expect(sprites).toHaveLength(3);
+    return sprites.map((s) => s.scale.x);
+  };
+
+  it('з перспективою розмір підпису не залежить від відстані; в ортогональній — множиться на відстань до цілі', () => {
+    const axes = createAxes(LIGHT_THEME);
+    axes.setScreen(800, 50);
+    const perspective = labelScale(axes);
+    // 18 px на екрані 800 px заввишки при куті огляду 50°.
+    const expected = (18 * 2 * Math.tan((50 * Math.PI) / 360)) / 800;
+    for (const s of perspective) expect(s).toBeCloseTo(expected, 12);
+
+    // Ортогональна проекція: висота кадру = 2 · d · tan(fov/2) метрів, тож 18 px = scale · d метрів.
+    axes.setScreen(800, 50, 4);
+    for (const s of labelScale(axes)) expect(s).toBeCloseTo(expected * 4, 12);
+    const frameHeightM = 2 * 4 * Math.tan((50 * Math.PI) / 360);
+    expect((labelScale(axes)[0]! / frameHeightM) * 800).toBeCloseTo(18, 9);
+    axes.setScreen(800, 50, 0.5);
+    for (const s of labelScale(axes)) expect(s).toBeCloseTo(expected * 0.5, 12);
+
+    // Назад у перспективу — як було.
+    axes.setScreen(800, 50);
+    for (const s of labelScale(axes)) expect(s).toBeCloseTo(expected, 12);
+    axes.dispose();
+  });
+});

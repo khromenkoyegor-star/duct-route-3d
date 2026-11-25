@@ -8,10 +8,14 @@ import { ICON_SHOW_ALL } from './icons';
  */
 export type ViewAxis = 'X' | 'Y' | 'Z';
 
+export type ViewProjection = 'perspective' | 'ortho';
+
 export interface ViewBar {
   element: HTMLElement;
   /** Показати, який вид увімкнено (null — жодного: камеру повернули вручну). */
   setActive(axis: ViewAxis | null, side?: 1 | -1): void;
+  /** Показати, яка проекція ввімкнена (кнопка «Орто» підсвічена), і на 1,5 с — плашку з назвою. */
+  setProjection(projection: ViewProjection): void;
 }
 
 const LABELS: Record<ViewAxis, string> = {
@@ -31,8 +35,9 @@ const TOAST_MS = 1500;
 /**
  * onShowAll — кнопка «Показати все» в цьому ж блоці: видно лише на iPhone вертикально, поки
  * доводять точку (тоді нижня панель кнопок схована — там джойстик; див. style.css).
+ * onProjection — кнопка «Орто»: ортогональна проекція (без перспективи, як на кресленні) ↔ перспектива.
  */
-export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () => void): ViewBar {
+export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () => void, onProjection?: () => void): ViewBar {
   const element = document.createElement('div');
   element.className = 'view-area';
 
@@ -51,6 +56,19 @@ export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () =
     button.addEventListener('click', () => onView(axis));
     buttons.set(axis, button);
     bar.append(button);
+  }
+
+  let ortho: HTMLButtonElement | null = null;
+  if (onProjection) {
+    ortho = document.createElement('button');
+    ortho.type = 'button';
+    ortho.className = 'view-button view-button--ortho';
+    ortho.dataset.testid = 'view-ortho';
+    ortho.textContent = 'Орто';
+    ortho.setAttribute('aria-label', 'Ортогональна проекція — без перспективи, як на кресленні. Ще раз — перспектива');
+    ortho.setAttribute('aria-pressed', 'false');
+    ortho.addEventListener('click', onProjection);
+    bar.append(ortho);
   }
 
   if (onShowAll) {
@@ -74,6 +92,21 @@ export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () =
 
   element.append(bar, toast);
 
+  const showToast = (text: string | null) => {
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = 0;
+    if (!text) {
+      toast.hidden = true;
+      return;
+    }
+    toast.textContent = text;
+    toast.hidden = false;
+    toastTimer = window.setTimeout(() => {
+      toast.hidden = true;
+      toastTimer = 0;
+    }, TOAST_MS);
+  };
+
   return {
     element,
     setActive(axis, side = 1) {
@@ -82,17 +115,13 @@ export function createViewBar(onView: (axis: ViewAxis) => void, onShowAll?: () =
         button.classList.toggle('view-button--active', on);
         button.setAttribute('aria-pressed', String(on));
       }
-      if (toastTimer) window.clearTimeout(toastTimer);
-      if (!axis) {
-        toast.hidden = true;
-        return;
-      }
-      toast.textContent = viewCaption(axis, side);
-      toast.hidden = false;
-      toastTimer = window.setTimeout(() => {
-        toast.hidden = true;
-        toastTimer = 0;
-      }, TOAST_MS);
+      showToast(axis ? viewCaption(axis, side) : null);
+    },
+    setProjection(projection) {
+      const on = projection === 'ortho';
+      ortho?.classList.toggle('view-button--active', on);
+      ortho?.setAttribute('aria-pressed', String(on));
+      showToast(on ? 'Ортогональна проекція' : 'Перспектива');
     },
   };
 }

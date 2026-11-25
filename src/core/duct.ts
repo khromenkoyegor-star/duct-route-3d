@@ -9,7 +9,7 @@
  *
  * Чиста логіка: усе в мм, без Three.js і без DOM. 3D будується з цих даних (scene/duct-mesh.ts).
  */
-import { NODE_TOLERANCE_MM, type P3, type PointMm, type RouteSet, segmentDirection } from './route';
+import { NODE_TOLERANCE_MM, type P3, type PointMm, type RouteSet, segmentHeading } from './route';
 
 /** Діаметри круглих повітропроводів, мм — список Єгора (09.11.2026). */
 export const DUCT_DIAMETERS_MM: readonly number[] = [100, 125, 150, 160, 200, 250, 315, 355, 400, 450];
@@ -25,6 +25,11 @@ export const RECT_SIDE_MAX_MM = 3000;
  */
 export const ELBOW_ROUND_R_FACTOR = 1;
 export const ELBOW_ROUND_SEGMENTS = 4;
+/**
+ * Сегментне коліно 45°: той самий R = D, 3 сегменти — дві половинки по 11,25° і один цілий 22,5°
+ * (каталоги: «відводи 45–75° — з 3 сегментів, 90° — з 4»).
+ */
+export const ELBOW_ROUND_SEGMENTS_45 = 3; // TEMP — з каталогів, чекає підтвердження Єгора
 
 /**
  * Радіусне коліно прямокутного повітропроводу: внутрішній радіус, мм (каталоги, напр. Вентека
@@ -87,12 +92,20 @@ export interface DuctElbow {
   at: P3;
   dirIn: P3;
   dirOut: P3;
-  /** Радіус по осі, мм; дотична довжина коліна 90° — теж R. */
+  /** Кут повороту, рад: 90° або 45°. */
+  angleRad: number;
+  /** Радіус по осі, мм. */
   radiusMm: number;
+  /** Дотична довжина, мм: на стільки коліно «з'їдає» кожен із сусідніх відрізків (R·tg(кут/2); для 90° — R). */
+  tangentMm: number;
+  /** Скільки сегментів у круглого коліна (4 для 90°, 3 для 45°). */
+  segments: number;
   section: DuctSection;
   /** Рамка перерізу на вході в коліно. */
   frameIn: Frame;
-  /** Початок і кінець коліна на осі (= at ∓ dir·R) і центр дуги. */
+  /** Одиничний вектор у площині повороту, перпендикулярний входу: від початку коліна до центру дуги. */
+  inward: P3;
+  /** Початок і кінець коліна на осі (= at ∓ dir·дотична) і центр дуги. */
   start: P3;
   end: P3;
   centre: P3;
@@ -122,6 +135,11 @@ export interface DuctLayout {
   elbows: DuctElbow[];
   transitions: DuctTransitionPiece[];
   problems: DuctProblem[];
+  /**
+   * Вузли, де прямокутна труба повертає не в площині своїх сторін (буває при поєднанні відрізків
+   * під 45° у різних площинах): стандартної деталі для такого повороту немає.
+   */
+  oblique: number[];
 }
 
 /** Допуск «вміщається», мм (як і в трасі). */
@@ -134,6 +152,7 @@ const scale = (a: P3, k: number): P3 => ({ x: a.x * k, y: a.y * k, z: a.z * k })
 const dot = (a: P3, b: P3) => a.x * b.x + a.y * b.y + a.z * b.z;
 const cross = (a: P3, b: P3): P3 => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
 const length = (a: P3) => Math.hypot(a.x, a.y, a.z);
+const normalize = (a: P3): P3 => scale(a, 1 / length(a));
 const along = (p: P3, dir: P3, k: number): P3 => add(p, scale(dir, k));
 /** Прибрати −0 і похибку на кшталт 1e-17 у ортах. */
 const clean = (a: P3): P3 => ({ x: Math.round(a.x * 1e12) / 1e12 || 0, y: Math.round(a.y * 1e12) / 1e12 || 0, z: Math.round(a.z * 1e12) / 1e12 || 0 });
@@ -249,18 +268,22 @@ function dropRedundant(section: DuctSection, transitions: readonly DuctTransitio
 
 // ── Рамка прямокутного перерізу ──
 
+/** Напрямки майже збігаються — вузол без повороту (косинус кута більший за це). */
+const STRAIGHT_COS = 0.999;
+
 /**
- * Рамки перерізу по відрізках. На першій горизонтальній ділянці висота — вертикально (v = +Y);
- * якщо траса починається вертикально — ширина вздовж +X. Через коліно рамка повертається разом
- * з трубою (поворот навколо осі «вхід × вихід»), як у справжньому повітропроводі: вектор,
- * перпендикулярний площині повороту, лишається; той, що в площині, з напрямку виходу стає −входом.
+ * Рамки перерізу по відрізках. На першій ділянці висота — «якнайвище»: вертикально для горизонтальної
+ * ділянки, у вертикальній площині — для похилої; якщо траса починається строго вертикально — ширина
+ * вздовж +X. Через коліно (90° чи 45°) рамка повертається разом з трубою — навколо осі «вхід × вихід»
+ * на кут повороту, як у справжньому повітропроводі: вектор, перпендикулярний площині повороту, лишається.
  */
 export function segmentFrames(dirs: readonly P3[]): Frame[] {
   if (dirs.length === 0) return [];
   const d0 = dirs[0]!;
   let frame: Frame;
-  if (Math.abs(d0.y) < 0.5) {
-    const v = AXIS_UNIT.Y;
+  if (Math.abs(d0.y) < STRAIGHT_COS) {
+    // v — проєкція вертикалі на площину, перпендикулярну осі (для горизонтальної ділянки — рівно +Y).
+    const v = d0.y === 0 ? AXIS_UNIT.Y : clean(normalize(sub(AXIS_UNIT.Y, scale(d0, d0.y))));
     frame = { u: clean(cross(v, d0)), v };
   } else {
     const u = AXIS_UNIT.X;
@@ -270,24 +293,31 @@ export function segmentFrames(dirs: readonly P3[]): Frame[] {
   for (let i = 1; i < dirs.length; i++) {
     const a = dirs[i - 1]!;
     const b = dirs[i]!;
+    const cos = dot(a, b);
     // Вузол без повороту (траса йде далі прямо) — переріз не повертається.
-    if (dot(a, b) > 0.5) {
+    if (cos > STRAIGHT_COS) {
       frames.push(frame);
       continue;
     }
-    const n = cross(a, b);
-    const turn = (w: P3) => clean(sub(scale(n, dot(w, n)), scale(a, dot(w, b))));
+    // Поворот Родріга навколо n = (a × b)/sin на кут між a і b (cos і sin — точні для 90° і 45°).
+    const axb = cross(a, b);
+    const sin = length(axb);
+    const n = scale(axb, 1 / sin);
+    const turn = (w: P3) =>
+      clean(add(add(scale(w, cos), scale(cross(n, w), sin)), scale(n, dot(n, w) * (1 - cos))));
     frame = { u: turn(frame.u), v: turn(frame.v) };
     frames.push(frame);
   }
   return frames;
 }
 
-/** Радіус по осі коліна 90° для перерізу: круглі — R = D; прямокутні — внутрішній радіус + B/2. */
-export function elbowRadiusMm(section: DuctSection, frameIn: Frame, dirOut: P3): number {
+/**
+ * Радіус по осі коліна для перерізу: круглі — R = D; прямокутні — внутрішній радіус + B/2,
+ * де B — сторона в площині повороту (`inward` — напрямок до центру дуги).
+ */
+export function elbowRadiusMm(section: DuctSection, frameIn: Frame, inward: P3): number {
   if (section.shape === 'round') return ELBOW_ROUND_R_FACTOR * section.diameterMm;
-  // Сторона в площині повороту: та, що дивиться у напрямку виходу.
-  const bend = Math.abs(dot(frameIn.u, dirOut)) > 0.5 ? section.widthMm : section.heightMm;
+  const bend = Math.abs(dot(frameIn.u, inward)) >= Math.abs(dot(frameIn.v, inward)) ? section.widthMm : section.heightMm;
   return RECT_ELBOW_INNER_R_MM + bend / 2;
 }
 
@@ -305,9 +335,9 @@ export function ductLayout(nodes: readonly PointMm[], spec: DuctSpec): DuctLayou
     const a = nodes[i]!;
     const b = nodes[i + 1]!;
     // Той самий допуск, що й у перевірці траси (вузли можуть відхилятися до 0,1 мм).
-    const d = segmentDirection(a, b, NODE_TOLERANCE_MM);
-    if (!d) throw new RangeError('Траса має йти вздовж осей (див. route.ts)');
-    dirs.push(scale(AXIS_UNIT[d.axis], d.sign));
+    const heading = segmentHeading(a, b, NODE_TOLERANCE_MM);
+    if (!heading) throw new RangeError('Траса має йти вздовж осей або під 45° (див. route.ts)');
+    dirs.push(heading.unit);
     lengths.push(length(sub(b, a)));
   }
   const sections = sectionsBySegment(spec, count);
@@ -323,29 +353,45 @@ export function ductLayout(nodes: readonly PointMm[], spec: DuctSpec): DuctLayou
   // Коліно у вузлі k (1…count−1) — розміру відрізка k−1: перехід, якщо є, стоїть уже після коліна.
   // У вузлі без повороту (траса йде далі прямо) коліна немає — труба суцільна.
   const elbows: DuctElbow[] = [];
+  const oblique: number[] = [];
   const elbowAt: number[] = new Array(count + 1).fill(0);
   for (let k = 1; k < count; k++) {
     const dirIn = dirs[k - 1]!;
     const dirOut = dirs[k]!;
-    if (dot(dirIn, dirOut) > 0.5) continue;
+    const cos = dot(dirIn, dirOut);
+    if (cos > STRAIGHT_COS) continue;
+    const angleRad = Math.acos(Math.max(-1, Math.min(1, cos)));
+    // У площині повороту, перпендикулярно входу, в бік виходу — до центру дуги (для 90° — сам вихід).
+    const inward = clean(normalize(sub(dirOut, scale(dirIn, cos))));
     const section = sections[k - 1]!;
     const frameIn = frames[k - 1]!;
-    const radiusMm = elbowRadiusMm(section, frameIn, dirOut);
+    const radiusMm = elbowRadiusMm(section, frameIn, inward);
+    // tg(кут/2) = sin / (1 + cos): для 90° виходить рівно 1 (дотична = R), без похибки Math.tan.
+    const tangentMm = (radiusMm * length(cross(dirIn, dirOut))) / (1 + cos);
     const at = nodes[k]!;
-    const start = along(at, dirIn, -radiusMm);
+    const start = along(at, dirIn, -tangentMm);
+    if (section.shape === 'rect') {
+      // Вісь повороту має бути паралельна одній зі сторін перерізу — інакше стандартної деталі немає.
+      const n = normalize(cross(dirIn, dirOut));
+      if (Math.min(Math.abs(dot(frameIn.u, n)), Math.abs(dot(frameIn.v, n))) > 1e-6) oblique.push(k);
+    }
     elbows.push({
       node: k,
       at: { ...at },
       dirIn,
       dirOut,
+      angleRad,
       radiusMm,
+      tangentMm,
+      segments: angleRad < Math.PI / 3 ? ELBOW_ROUND_SEGMENTS_45 : ELBOW_ROUND_SEGMENTS,
       section,
       frameIn,
+      inward,
       start,
-      end: along(at, dirOut, radiusMm),
-      centre: along(start, dirOut, radiusMm),
+      end: along(at, dirOut, tangentMm),
+      centre: along(start, inward, radiusMm),
     });
-    elbowAt[k] = radiusMm;
+    elbowAt[k] = tangentMm;
   }
 
   const straights: DuctStraight[] = [];
@@ -391,32 +437,30 @@ export function ductLayout(nodes: readonly PointMm[], spec: DuctSpec): DuctLayou
       });
     }
   }
-  return { segments, straights, elbows, transitions, problems };
+  return { segments, straights, elbows, transitions, problems, oblique };
 }
+
+/** Точка на відстані `radius` від центру дуги коліна під кутом φ (рад) від його початку. */
+const onElbow = (elbow: DuctElbow, phi: number, radius: number): P3 =>
+  add(elbow.centre, add(scale(elbow.inward, -radius * Math.cos(phi)), scale(elbow.dirIn, radius * Math.sin(phi))));
 
 /**
  * Вісь сегментного коліна — ламана: кінці на дузі радіуса R, внутрішні вершини — на площинах стиків
- * (для 4 сегментів — 15°, 45°, 75°) на відстані R / cos(Δ/2) від центру, де Δ — кут цілого сегмента.
- * Кінцеві сегменти — половинки (Δ/2). Повертає точки від початку коліна до кінця.
+ * на відстані R / cos(Δ/2) від центру, де Δ — кут цілого сегмента (кут коліна / (сегментів − 1)).
+ * Кінцеві сегменти — половинки (Δ/2): для 90° з 4 сегментів стики на 15°, 45°, 75°; для 45° з 3 — на
+ * 11,25° і 33,75°. Повертає точки від початку коліна до кінця.
  */
-export function roundElbowPolyline(elbow: DuctElbow, segments = ELBOW_ROUND_SEGMENTS): P3[] {
-  const quarter = Math.PI / 2;
-  const full = quarter / (segments - 1);
-  const r = elbow.radiusMm;
-  const at = (theta: number, radius: number) =>
-    add(elbow.centre, add(scale(elbow.dirOut, -radius * Math.cos(theta)), scale(elbow.dirIn, radius * Math.sin(theta))));
+export function roundElbowPolyline(elbow: DuctElbow, segments = elbow.segments): P3[] {
+  const full = elbow.angleRad / (segments - 1);
   const points: P3[] = [elbow.start];
-  for (let i = 0; i < segments - 1; i++) points.push(at(full / 2 + i * full, r / Math.cos(full / 2)));
+  for (let i = 0; i < segments - 1; i++) points.push(onElbow(elbow, full / 2 + i * full, elbow.radiusMm / Math.cos(full / 2)));
   points.push(elbow.end);
   return points;
 }
 
-/** Точка на осі радіусного (прямокутного) коліна під кутом θ (0…90°, у радіанах) від початку. */
-export function elbowArcPoint(elbow: DuctElbow, theta: number): P3 {
-  return add(
-    elbow.centre,
-    add(scale(elbow.dirOut, -elbow.radiusMm * Math.cos(theta)), scale(elbow.dirIn, elbow.radiusMm * Math.sin(theta))),
-  );
+/** Точка на осі радіусного (прямокутного) коліна під кутом φ (рад, від 0 до кута коліна) від початку. */
+export function elbowArcPoint(elbow: DuctElbow, phi: number): P3 {
+  return onElbow(elbow, phi, elbow.radiusMm);
 }
 
 /** Довжина повітропроводу по осі, мм (прямі + коліна по ламаній/дузі + переходи). */
@@ -428,7 +472,7 @@ export function ductAxisLengthMm(layout: DuctLayout): number {
     if (e.section.shape === 'round') {
       const pts = roundElbowPolyline(e);
       for (let i = 1; i < pts.length; i++) total += length(sub(pts[i]!, pts[i - 1]!));
-    } else total += (Math.PI / 2) * e.radiusMm;
+    } else total += e.angleRad * e.radiusMm;
   }
   return total;
 }
