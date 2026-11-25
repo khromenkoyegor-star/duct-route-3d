@@ -118,7 +118,9 @@ export interface Viewer {
   /**
    * Тримати точку (м) в прямокутнику екрана `area` (CSS px): якщо вона вийшла за нього, камера й ціль
    * зсуваються паралельно екрану — без повороту й без зміни масштабу — рівно настільки, щоб точка
-   * стала на його край. Для точки, яку тягнуть джойстиком: камера «їде» за нею. true — камеру зсунуто.
+   * стала на його край. Для точки, яку тягнуть джойстиком: камера «їде» за нею. Якщо точку тягнуть на
+   * камеру, камера відступає назад уздовж погляду (теж без повороту), щоб точка не пройшла повз неї.
+   * true — камеру зсунуто.
    */
   followPoint(point: Vec3Like, area: { left: number; right: number; top: number; bottom: number }): boolean;
   /**
@@ -192,6 +194,12 @@ export function createViewer(container: HTMLElement): Viewer {
   // (зсередини кімнати стіна за спиною не закриває вид), лише без перспективного спотворення.
   const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
   let projection: Projection = 'perspective';
+  /**
+   * Камера за точкою (followPoint): ближче за це точку до камери не підпускаємо — камера відступає назад.
+   * Щонайменше 0,5 м і щонайменше 30 % відстані до цілі (щоб довкола точки було видно, де вона).
+   */
+  const FOLLOW_MIN_DEPTH_M = 0.5;
+  const FOLLOW_MIN_DEPTH_SHARE = 0.3;
   let lastWidth = 0;
   let lastHeight = 0;
 
@@ -558,14 +566,30 @@ export function createViewer(container: HTMLElement): Viewer {
     },
     followPoint(point, area) {
       if (!(area.right >= area.left) || !(area.bottom >= area.top)) return false;
-      const cam = view();
-      const depth = -new Vector3(point.x, point.y, point.z).applyMatrix4(cam.matrixWorldInverse).z;
-      // Точка за камерою — паралельним зсувом її не показати (це робить centerOn після відпускання).
-      if (!(depth > cam.near)) return false;
+      const p = new Vector3(point.x, point.y, point.z);
+      let depth = -p.clone().applyMatrix4(view().matrixWorldInverse).z;
+      // Точку тягнуть на камеру: камера відступає назад уздовж погляду (разом з ціллю — без повороту
+      // й без зміни відстані до цілі), щоб точка лишалась попереду, а не пройшла повз камеру й зникла.
+      const minDepth = Math.max(FOLLOW_MIN_DEPTH_M, camera.position.distanceTo(controls.target) * FOLLOW_MIN_DEPTH_SHARE);
+      let retreated = false;
+      if (!(depth >= minDepth) && Number.isFinite(depth)) {
+        const back = new Vector3().setFromMatrixColumn(camera.matrixWorld, 2).multiplyScalar(minDepth - depth);
+        camera.position.add(back);
+        controls.target.add(back);
+        camera.updateMatrixWorld();
+        depth = minDepth;
+        retreated = true;
+      }
       const screen = projectPoint(point);
       const dx = screen.x - Math.min(Math.max(screen.x, area.left), area.right);
       const dy = screen.y - Math.min(Math.max(screen.y, area.top), area.bottom);
-      if (dx === 0 && dy === 0) return false;
+      if (dx === 0 && dy === 0) {
+        if (retreated) {
+          controls.update();
+          requestRender();
+        }
+        return retreated;
+      }
       const metresPerPx = metresPerPixel(depth);
       const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
       const up = new Vector3().setFromMatrixColumn(camera.matrixWorld, 1);

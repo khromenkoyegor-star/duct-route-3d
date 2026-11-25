@@ -142,20 +142,18 @@ test.describe('Поворот 45° під час побудови траси', (
     await button.click();
     const picker = shown(page, 'segment-45-picker');
     await expect(picker).toBeVisible();
+    await frames(page, 2);
     expect(await picker.locator('button').evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))).toEqual([
       'segment-45-z-plus',
       'segment-45-z-minus',
       'segment-45-y-plus',
       'segment-45-y-minus',
     ]);
-    // Стрілка на варіанті «Z+» — туди, куди діагональ X+Z+ піде на екрані.
+    // Стрілка на варіанті «Z+» — туди, куди діагональ X+Z+ піде на екрані (сума екранних стрілок X+ і Z+ біля точки).
     {
       const p0: P3 = (await editor(page)).point;
-      const [sa, sb] = [
-        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), p0),
-        await page.evaluate((p) => window.__trasa!.viewer.projectPoint(p), { x: p0.x + 0.3, y: p0.y, z: p0.z + 0.3 }),
-      ];
-      const want = Math.atan2(sb.y - sa.y, sb.x - sa.x);
+      const ax = await page.evaluate((p) => window.__trasa!.viewer.screenAxes(p), p0);
+      const want = Math.atan2(ax.X.y + ax.Z.y, ax.X.x + ax.Z.x);
       const got = await shown(page, 'segment-45-z-plus').locator('.diag-option-icon').evaluate((el) => {
         const m = new DOMMatrix(getComputedStyle(el).transform);
         return Math.atan2(m.b, m.a);
@@ -199,10 +197,11 @@ test.describe('Поворот 45° під час побудови траси', (
     expect(e.canConfirm).toBe(true);
 
     // Той самий джойстик (по X) веде точку вздовж діагоналі.
-    await pull(page, 'X', 1, 400);
+    await pull(page, 'X', 1, 600);
     e = await editor(page);
     const further = offset(anchor, e.point);
-    expect(further.x).toBeGreaterThan(d.x + 0.03);
+    // Поріг невеликий: у CI (WebKit без відеокарти) кадри рідкі, і хід за той самий час менший.
+    expect(further.x).toBeGreaterThan(d.x + 0.01);
     expect(Math.abs(further.z - further.x)).toBeLessThan(TOL_M);
     expect(further.y).toBe(0);
     // Джойстик у бік другої осі (Z) теж веде по тій самій діагоналі, а не ламає її.

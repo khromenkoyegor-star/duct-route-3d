@@ -43,15 +43,38 @@ async function openRoom(page: Page, from: P3 = { x: 3.2, y: 3.4, z: 5.2 }, to: P
   await frames(page);
 }
 
-/** Наблизити колесом біля курсора (кілька «клацань» колеса). */
+/**
+ * Наблизити колесом біля курсора (кілька «клацань» колеса). Playwright не вміє page.mouse.wheel у мобільному
+ * WebKit (профілі iPad/iPhone у CI), тож подію колеса (як від мишки чи трекпада iPad) надсилаємо в полотно.
+ */
 async function zoomIn(page: Page, x: number, y: number) {
   await page.mouse.move(x, y);
   for (let i = 0; i < 4; i++) {
-    await page.mouse.wheel(0, -120);
+    await page.evaluate(
+      (c) =>
+        window.__trasa!.viewer.canvas.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -120, deltaMode: 0, clientX: c.x, clientY: c.y, bubbles: true, cancelable: true }),
+        ),
+      { x, y },
+    );
     await frames(page, 2);
   }
   await frames(page, 30);
 }
+
+/**
+ * Клік у цілий піксель (WebKit і так округлює координати кліку) і що саме там на скані.
+ * У «Орто» з далекої камери піксель — це сантиметри, тож очікування — поверхня під цим самим пікселем.
+ */
+async function clickScan(page: Page, p: P3) {
+  const s = await project(page, p);
+  const at = { x: Math.round(s.x), y: Math.round(s.y) };
+  const hit = await page.evaluate((c) => window.__trasa!.viewer.raycastScan(c.x, c.y), at);
+  expect(hit, 'під пікселем немає скану').not.toBeNull();
+  await page.mouse.click(at.x, at.y);
+  return { x: hit!.x, y: hit!.y, z: hit!.z };
+}
+const near = (a: P3, b: P3) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
 /** «Підтвердити точку»; після цього ~0,35 с дотики по скану ігноруються (захист від подвійного натискання). */
 async function confirmPoint(page: Page) {
@@ -198,7 +221,12 @@ test.describe('Ортогональна проекція', () => {
     await page.mouse.move(slider.x + slider.width / 2, slider.y + slider.height / 2);
     await page.mouse.down();
     await page.mouse.move(slider.x + slider.width / 2, slider.y + slider.height / 2 - 58, { steps: 3 });
-    await page.waitForTimeout(1500);
+    // Тримаємо, доки точка не підніметься на 0,25 м (не довше 20 с): у CI кадри то рідші, то частіші.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20_000) {
+      await page.waitForTimeout(300);
+      if ((await state(page)).routes.editor.point.y > 0.25) break;
+    }
     await page.mouse.up();
     await frames(page, 5);
     const point: P3 = (await state(page)).routes.editor.point;
@@ -275,26 +303,28 @@ test.describe('Ортогональна проекція', () => {
     await page.getByTestId('ruler').click();
     const a = { x: -0.9, y: 0, z: 0.3 };
     const b = { x: 0.6, y: 0, z: 0.3 };
-    const pa = await project(page, a);
-    await page.mouse.click(pa.x, pa.y);
+    const hitA = await clickScan(page, a);
     await confirmPoint(page);
-    const pb = await project(page, b);
-    await page.mouse.click(pb.x, pb.y);
+    const hitB = await clickScan(page, b);
     await confirmPoint(page);
     const ruler = (await state(page)).ruler;
     expect(ruler.points).toHaveLength(2);
-    // Клік — у цілі пікселі, тож допуск кілька мм; точки саме на підлозі.
-    expect(Math.abs(ruler.distanceMm - 1500)).toBeLessThan(8);
+    // Точки — саме там, куди натиснули (±1 мм), на підлозі; відстань — між ними.
+    expect(near(ruler.points[0], hitA)).toBeLessThan(0.001);
+    expect(near(ruler.points[1], hitB)).toBeLessThan(0.001);
     for (const p of ruler.points as P3[]) expect(Math.abs(p.y)).toBeLessThan(0.001);
+    expect(Math.abs(ruler.distanceMm - near(hitA, hitB) * 1000)).toBeLessThan(1);
+    // А цілі пікселі від задуманих точок — недалеко: ≈ 1500 мм.
+    expect(Math.abs(ruler.distanceMm - 1500)).toBeLessThan(40);
     await page.getByTestId('ruler').click();
 
     // Траса: перша точка дотиком, друга — джойстиком по X.
     await page.getByTestId('route').click();
     const start = { x: -0.5, y: 0, z: 0.4 };
-    const ps = await project(page, start);
-    await page.mouse.click(ps.x, ps.y);
+    const hitStart = await clickScan(page, start);
     let editor = (await state(page)).routes.editor;
-    expect(Math.hypot(editor.point.x - start.x, editor.point.z - start.z)).toBeLessThan(0.01);
+    expect(near(editor.point, hitStart)).toBeLessThan(0.001);
+    expect(Math.hypot(editor.point.x - start.x, editor.point.z - start.z)).toBeLessThan(0.04);
     expect(Math.abs(editor.point.y)).toBeLessThan(0.001);
     await confirmPoint(page);
     const axes = await page.evaluate((p) => window.__trasa!.viewer.screenAxes(p), editor.point as P3);
