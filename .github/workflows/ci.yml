@@ -1,5 +1,10 @@
 # Збірка й тести на кожен PR; після злиття в main — ті самі тести і публікація на GitHub Pages.
 # Скріншоти iPad/iPhone і звіт Playwright — в артефакті «screenshots-and-report» кожного запуску.
+#
+# На сайті дві версії:
+# - https://khromenkoyegor-star.github.io/duct-route-3d/       — стабільна 4.1, НЕЗМІННА: щоразу
+#   збирається з одного й того самого коміту (резервна гілка stable-v4.1), а не з main;
+# - https://khromenkoyegor-star.github.io/duct-route-3d/next/  — «Траса 3D 2»: main, уся подальша робота.
 name: CI
 
 on:
@@ -56,11 +61,27 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      # Стабільна версія 4.1 — точно той коміт, що був на сайті до розділення (гілка stable-v4.1).
+      # Нічого не міняти тут без прохання Єгора: ця адреса має працювати як раніше.
+      - name: Стабільна версія 4.1 (незмінна) — на стару адресу
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          STABLE_SHA: b934c14186ee85106c62530032c5624658c02832
+        run: |
+          git fetch --depth=1 origin "$STABLE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/stable" "$STABLE_SHA"
+          (cd "$RUNNER_TEMP/stable" && npm ci && npm run build)
+          mkdir -p "$RUNNER_TEMP/site"
+          cp -R "$RUNNER_TEMP/stable/dist/." "$RUNNER_TEMP/site/"
+          # Нова версія «Траса 3D 2» (main) — у папку next/.
+          cp -R dist "$RUNNER_TEMP/site/next"
+          test -f "$RUNNER_TEMP/site/index.html" && test -f "$RUNNER_TEMP/site/next/index.html"
+
       - name: Зібраний сайт для GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dist
+          path: ${{ runner.temp }}/site
 
   deploy:
     name: Публікація на GitHub Pages

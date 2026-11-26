@@ -1,7 +1,7 @@
 {
-  "id": "/duct-route-3d/",
-  "name": "Траса 3D",
-  "short_name": "Траса 3D",
+  "id": "/duct-route-3d/next/",
+  "name": "Траса 3D 2",
+  "short_name": "Траса 3D 2",
   "description": "Траса повітропроводу в 3D-скані приміщення",
   "lang": "uk",
   "dir": "ltr",

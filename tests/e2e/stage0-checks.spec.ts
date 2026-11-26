@@ -5,7 +5,7 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-const BASE_PATH = '/duct-route-3d/';
+const BASE_PATH = '/duct-route-3d/next/';
 
 interface Point {
   x: number;
