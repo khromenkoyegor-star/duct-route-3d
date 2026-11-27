@@ -7,7 +7,7 @@
  * бути недоступне (приватний режим) чи переповнене — тоді чернетки просто не пишуться, програма працює.
  * Надійне збереження — файл проєкту (project.ts).
  */
-import { type ProjectData, parseProject, type ScanFingerprint, scanKey, serializeProject } from '../core/project';
+import { type ProjectData, parseProject, sameScan, type ScanFingerprint, scanKey, serializeProject } from '../core/project';
 
 export const DRAFTS_KEY = 'trasa3d2.drafts.v1';
 /** Скільки сканів пам'ятаємо (найновіші). */
@@ -47,12 +47,21 @@ export function browserStorage(): DraftStorage | null {
 }
 
 export function createDrafts(storage: DraftStorage | null, now: () => Date = () => new Date()): Drafts {
+  /** Лише справні записи (зіпсований чи чужий запис усередині сховища просто відкидається). */
   const read = (): Stored => {
     if (!storage) return {};
     try {
       const raw = storage.getItem(DRAFTS_KEY);
       const parsed: unknown = raw ? JSON.parse(raw) : {};
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Stored) : {};
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+      const out: Stored = {};
+      for (const [key, entry] of Object.entries(parsed as Record<string, unknown>)) {
+        const e = entry as { savedAt?: unknown; text?: unknown } | null;
+        if (e && typeof e === 'object' && typeof e.savedAt === 'string' && typeof e.text === 'string') {
+          out[key] = { savedAt: e.savedAt, text: e.text };
+        }
+      }
+      return out;
     } catch {
       return {};
     }
@@ -68,32 +77,51 @@ export function createDrafts(storage: DraftStorage | null, now: () => Date = () 
     }
   };
 
+  /**
+   * Прибрати з `all` чернетки цього скану. «Той самий скан» — за sameScan (трикутники й габарит ±1 мм),
+   * а не за ключем запису: так немає межі округлення, і різні скани з однаковою кількістю трикутників
+   * не затирають один одного. Зіпсовані записи теж прибираються.
+   */
+  const dropScan = (all: Stored, scan: ScanFingerprint) => {
+    for (const [key, entry] of Object.entries(all)) {
+      const parsed = parseProject(entry.text);
+      if (!parsed.ok || !parsed.project.scan || sameScan(parsed.project.scan, scan)) delete all[key];
+    }
+  };
+
   return {
     available: storage !== null,
     get(scan) {
-      const entry = read()[scanKey(scan)];
-      if (!entry || typeof entry.text !== 'string') return null;
-      const parsed = parseProject(entry.text);
-      if (!parsed.ok || parsed.project.set.routes.length === 0) return null;
-      return { savedAt: typeof entry.savedAt === 'string' ? entry.savedAt : parsed.project.savedAt, project: parsed.project };
+      // Чернеток не більше DRAFTS_LIMIT — перебрати всі й узяти найновішу для цього скану.
+      let best: Draft | null = null;
+      for (const entry of Object.values(read())) {
+        const parsed = parseProject(entry.text);
+        if (!parsed.ok || !parsed.project.scan || parsed.project.set.routes.length === 0) continue;
+        if (!sameScan(parsed.project.scan, scan)) continue;
+        if (!best || entry.savedAt > best.savedAt) best = { savedAt: entry.savedAt, project: parsed.project };
+      }
+      return best;
     },
     save(project) {
       if (!project.scan) return;
       const all = read();
-      const key = scanKey(project.scan);
-      if (project.set.routes.length === 0) {
-        delete all[key];
-      } else {
+      dropScan(all, project.scan);
+      if (project.set.routes.length > 0) {
+        const size = project.scan.sizeMm;
+        const key = `${scanKey(project.scan)}:${Math.round(size.x)}x${Math.round(size.y)}x${Math.round(size.z)}`;
         all[key] = { savedAt: now().toISOString(), text: serializeProject(project) };
-        // Лише найновіші DRAFTS_LIMIT сканів.
-        const keys = Object.keys(all).sort((a, b) => (all[b]!.savedAt > all[a]!.savedAt ? 1 : -1));
-        for (const old of keys.slice(DRAFTS_LIMIT)) delete all[old];
+        // Лише DRAFTS_LIMIT сканів: щойно записаний лишається завжди (навіть якщо годинник перевели назад),
+        // з решти — найновіші.
+        const others = Object.keys(all)
+          .filter((k) => k !== key)
+          .sort((a, b) => all[b]!.savedAt.localeCompare(all[a]!.savedAt));
+        for (const old of others.slice(DRAFTS_LIMIT - 1)) delete all[old];
       }
       write(all);
     },
     remove(scan) {
       const all = read();
-      delete all[scanKey(scan)];
+      dropScan(all, scan);
       write(all);
     },
   };

@@ -98,6 +98,8 @@ const PHASE_TEXT: Record<LoadPhase, string> = {
 
 /** Чернетку пишемо через стільки після останньої зміни трас (не на кожен рух точки). */
 const DRAFT_DELAY_MS = 500;
+/** Назва чернетки, яку ще не зберігали у файл (при відновленні — знову «без назви»). */
+const DRAFT_NAME = 'Чернетка';
 
 /** «27.11 о 14:05» — коли записано чернетку. */
 function formatWhen(iso: string): string {
@@ -465,6 +467,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       // Траси попереднього скану — у його чернетку (повернуться, коли його відкриють знову).
       flushDraft();
       draftsPaused = true;
+      // Назва проєкту належала попередньому скану.
+      state.project.name = null;
       if (scan) {
         viewer.setScan(null);
         scan.dispose();
@@ -504,7 +508,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         const project = pendingProject;
         pendingProject = null;
         state.project.pending = null;
-        confirmProjectForScan(project, opened);
+        openPendingProject(project, opened);
       } else {
         offerDraft(opened);
       }
@@ -573,7 +577,7 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     draftScan = null;
     // Скан змінився, поки чекали, — ці траси вже не його.
     if (!target || !opened || !sameScan(target, opened)) return;
-    drafts.save(projectData(state.project.name ?? 'Чернетка'));
+    drafts.save(projectData(state.project.name ?? DRAFT_NAME));
   }
   // iOS може закрити сторінку без попередження — дописати чернетку, коли її ховають.
   window.addEventListener('pagehide', flushDraft);
@@ -590,6 +594,28 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       { label: 'Почати заново', role: 'cancel', testid: 'choice-fresh' },
       { label: 'Повернути', testid: 'choice-restore', onSelect: () => applyProject(draft.project) },
     ]);
+  }
+
+  /**
+   * Проєкт чекав на свій скан, і скан відкрито. Є ще й незбережена чернетка цього скану — питаємо, що
+   * відкрити (щоб проєкт мовчки не затер чернетку). Проєкт для іншого скану: «Скасувати» — пропонуємо чернетку.
+   */
+  function openPendingProject(project: ProjectData, opened: ScanFingerprint): void {
+    const draft = drafts.get(opened);
+    const forThisScan = !project.scan || sameScan(project.scan, opened);
+    if (draft && forThisScan) {
+      const count = formatRouteCount(draft.project.set.routes.length);
+      choice.show(
+        'Що відкрити?',
+        `Для цього скану є ще й чернетка з минулого разу: ${count} · ${formatWhen(draft.savedAt)}. Відкрити проєкт «${project.name}» замість неї?`,
+        [
+          { label: 'Чернетку', testid: 'choice-draft', onSelect: () => applyProject(draft.project) },
+          { label: 'Проєкт', testid: 'choice-project', onSelect: () => applyProject(project) },
+        ],
+      );
+      return;
+    }
+    confirmProjectForScan(project, opened, () => offerDraft(opened));
   }
 
   /** Показати проєкт: траси, повітропроводи, вигляд камери, режим показу. */
@@ -609,6 +635,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
         viewBar.setProjection(project.view.projection);
       }
       viewer.setView(toM(project.view.position), toM(project.view.target));
+      // Камера тепер з файлу — вид «строго вздовж осі» (підсвічена X/Y/Z) уже не той.
+      viewBar.setActive(null);
     }
     if (project.display) {
       state.ducts.mode = project.display.mode;
@@ -616,7 +644,8 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
       viewer.setScanTransparency(project.display.transparency);
       applyViewMode();
     }
-    state.project.name = project.name;
+    // Чернетка без назви — підказкою при збереженні знову буде «скан · дата».
+    state.project.name = project.name === DRAFT_NAME ? null : project.name;
     syncRouteUi();
   }
 
@@ -687,14 +716,17 @@ export function createApp(root: HTMLElement, viewer: Viewer): App {
     );
   }
 
-  /** Скан відкрито: проєкт для іншого скану — попередження; на екрані вже є траси — питання. */
-  function confirmProjectForScan(project: ProjectData, opened: ScanFingerprint): void {
+  /**
+   * Скан відкрито: проєкт для іншого скану — попередження («Скасувати» → onCancel); на екрані вже є
+   * траси — питання.
+   */
+  function confirmProjectForScan(project: ProjectData, opened: ScanFingerprint, onCancel?: () => void): void {
     if (project.scan && !sameScan(project.scan, opened)) {
       choice.show(
         'Проєкт для іншого скану',
         `«${project.name}» зроблено для скану «${project.scan.name}». Траси можуть не збігатися зі стінами. Показати все одно?`,
         [
-          { label: 'Скасувати', role: 'cancel', testid: 'choice-cancel' },
+          { label: 'Скасувати', role: 'cancel', testid: 'choice-cancel', onSelect: () => onCancel?.() },
           { label: 'Показати', testid: 'choice-show', onSelect: () => replaceRoutesWith(project) },
         ],
       );

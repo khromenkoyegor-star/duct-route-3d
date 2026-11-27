@@ -26,8 +26,11 @@ async function startEditing(page: Page, view: { from: P3; to: P3 } = { from: { x
   return editorPoint(page);
 }
 
-/** Відхилити елемент (джойстик/повзунок) мишкою на частку радіуса й потримати. */
-async function hold(page: Page, testid: string, dx: number, dy: number, ms: number) {
+/**
+ * Відхилити елемент (джойстик/повзунок) мишкою на частку радіуса й потримати. Повертає, скільки мс
+ * реально минуло від натискання до відпускання (у браузері тестів це помітно довше за `ms`).
+ */
+async function hold(page: Page, testid: string, dx: number, dy: number, ms: number): Promise<number> {
   const box = (await page.getByTestId(testid).boundingBox())!;
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
@@ -35,11 +38,14 @@ async function hold(page: Page, testid: string, dx: number, dy: number, ms: numb
   const rx = 64;
   const ry = 64;
   await page.mouse.move(cx, cy);
+  const t0 = Date.now();
   await page.mouse.down();
   await page.mouse.move(cx + dx * rx, cy + dy * ry, { steps: 3 });
   await page.waitForTimeout(ms);
   await page.mouse.up();
+  const held = Date.now() - t0;
   await page.waitForTimeout(50);
+  return held;
 }
 
 /** Напрямок осі на екрані біля точки. */
@@ -92,13 +98,14 @@ test.describe('Редактор точки: джойстик і повзунок
     await hold(page, 'stick-xz', ux * 0.2, uy * 0.2, 600);
     const slow = Math.abs((await editorPoint(page)).x - start.x) * 1000;
     const mid = await editorPoint(page);
-    await hold(page, 'stick-xz', ux, uy, 600);
+    const heldMs = await hold(page, 'stick-xz', ux, uy, 600);
     const fast = Math.abs((await editorPoint(page)).x - mid.x) * 1000;
     // Межі широкі: у CI (WebKit) кадри бувають рідкі, але порядок величин має зберігатися.
     expect(slow).toBeGreaterThan(0.2);
     expect(slow).toBeLessThan(20);
     expect(fast).toBeGreaterThan(30);
-    expect(fast).toBeLessThan(450); // не більше 0,5 м/с × 0,6 с + запас
+    // Не швидше за 0,5 м/с: за реальний час утримання (у тестовому браузері він довший за 0,6 с) + 10 %.
+    expect(fast).toBeLessThan(0.5 * heldMs * 1.1);
     expect(fast).toBeGreaterThan(slow * 5);
   });
 

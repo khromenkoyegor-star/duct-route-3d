@@ -200,6 +200,10 @@ export function createMenu(label: string): Menu {
   backdrop.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') hide();
   });
+  // Повернули пристрій чи змінився розмір вікна — меню закривається (як в iOS), а не лишається за краєм.
+  window.addEventListener('resize', () => {
+    if (!backdrop.hidden) hide();
+  });
 
   return {
     element: backdrop,

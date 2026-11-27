@@ -299,9 +299,10 @@ test.describe('Етап 6: відкриття проєкту', () => {
 
   test('спершу проєкт, потім його скан: просить відкрити скан — траси з\'являються на ньому', async ({ page }) => {
     const { text, view } = await makeProject(page);
-    await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.waitForFunction(() => (window.__trasa?.viewer.frameCount ?? 0) > 0);
+    // Чернетки цього скану немає (її дописують і під час перезавантаження — тому чистимо вже після нього).
+    await page.evaluate(() => localStorage.clear());
     await page.getByTestId('file-input').setInputFiles(projectFile(text, 'Цех 2.json'));
     await expect(page.getByTestId('choice')).toBeVisible();
     await expect(page.getByTestId('choice-text')).toContainText('Відкрийте скан «room-4000x2700x3000');
@@ -315,9 +316,10 @@ test.describe('Етап 6: відкриття проєкту', () => {
 
   test('скан і проєкт разом в одному виборі — відкрито обидва, без зайвих питань', async ({ page }) => {
     const { text, view } = await makeProject(page);
-    await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.waitForFunction(() => (window.__trasa?.viewer.frameCount ?? 0) > 0);
+    // Чернетки цього скану немає (її дописують і під час перезавантаження — тому чистимо вже після нього).
+    await page.evaluate(() => localStorage.clear());
     // Скан і проєкт одним вибором (обидва — з пам'яті: Playwright не змішує шляхи й буфери).
     await page.getByTestId('file-input').setInputFiles([
       { name: 'room-4000x2700x3000.zip', mimeType: 'application/zip', buffer: readFileSync(ROOM_ZIP) },

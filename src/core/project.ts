@@ -67,10 +67,12 @@ export function sameScan(a: ScanFingerprint, b: ScanFingerprint): boolean {
   return a.triangles === b.triangles && close(a.sizeMm.x, b.sizeMm.x) && close(a.sizeMm.y, b.sizeMm.y) && close(a.sizeMm.z, b.sizeMm.z);
 }
 
-/** Ключ скану для чернеток (той самий скан — той самий ключ, з точністю до 1 мм). */
+/**
+ * Ключ скану для чернеток — кількість трикутників (габарит не округлюємо: на межі округлення той самий
+ * скан отримав би два ключі). Що це справді той самий скан, перевіряє sameScan під час читання чернетки.
+ */
 export function scanKey(scan: ScanFingerprint): string {
-  const r = (v: number) => Math.round(v);
-  return `${scan.triangles}:${r(scan.sizeMm.x)}x${r(scan.sizeMm.y)}x${r(scan.sizeMm.z)}`;
+  return `t${scan.triangles}`;
 }
 
 /** Файл проєкту — JSON з відступами (його можна й прочитати очима). */
@@ -99,7 +101,8 @@ const NOT_A_PROJECT = 'Це не файл проєкту «Траса 3D 2» —
 export function parseProject(text: string): ParsedProject {
   let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    // BOM на початку (так зберігають деякі редактори) — не частина JSON.
+    raw = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch {
     return { ok: false, error: NOT_A_PROJECT };
   }
@@ -149,9 +152,18 @@ export function defaultProjectName(scanName: string | null, date: Date): string 
   return base ? `${base} · ${d}` : `Проєкт · ${d}`;
 }
 
-/** Ім'я файлу: назва без символів, яких не люблять «Файли» (/ \ : * ? " < > |), і «.json». */
+/**
+ * Ім'я файлу: назва без символів, яких не люблять «Файли» (/ \ : * ? " < > |), без крапки на початку
+ * (такий файл «Файли» iOS ховають), не довша за 80 символів (емодзі не розрізаються навпіл), і «.json».
+ */
 export function projectFileName(name: string): string {
-  const safe = name.replace(/[/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Проєкт';
+  const cleaned = name
+    .replace(/[/\\:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '')
+    .trim();
+  const safe = Array.from(cleaned).slice(0, 80).join('').trim() || 'Проєкт';
   return `${safe}${PROJECT_EXTENSION}`;
 }
 
@@ -177,8 +189,9 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Ціле додатне й «точне» (до 2⁵³): інакше n + 1 === n, і дві траси отримали б однаковий номер. */
 function isPositiveInt(v: unknown): v is number {
-  return typeof v === 'number' && Number.isInteger(v) && v > 0;
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v < Number.MAX_SAFE_INTEGER;
 }
 
 function isFiniteNumber(v: unknown): v is number {

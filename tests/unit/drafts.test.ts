@@ -52,6 +52,27 @@ describe('чернетки', () => {
     expect(drafts.get({ ...scan(100), name: 'інша назва.glb' })).not.toBeNull();
   });
 
+  it('різні скани з однаковою кількістю трикутників — окремі чернетки; той самий скан ±1 мм — одна', () => {
+    const storage = memoryStorage();
+    let t = 0;
+    const drafts = createDrafts(storage, () => new Date(Date.UTC(2026, 10, 27, 14, 5, t++)));
+    const room = scan(12);
+    const box: ScanFingerprint = { ...scan(12), name: 'box.glb', sizeMm: { x: 6000, y: 3000, z: 4000 } };
+    drafts.save(project(room, 2));
+    drafts.save(project(box, 3));
+    expect(drafts.get(room)!.project.set.routes).toHaveLength(2);
+    expect(drafts.get(box)!.project.set.routes).toHaveLength(3);
+    // Той самий скан, габарит відрізняється на частку міліметра через межу округлення — запис замінюється, не дублюється.
+    const roomAgain: ScanFingerprint = { ...room, sizeMm: { x: 4000.6, y: 2700, z: 3000 } };
+    drafts.save(project({ ...room, sizeMm: { x: 4000.4, y: 2700, z: 3000 } }, 1));
+    drafts.save(project(roomAgain, 4));
+    expect(drafts.get(room)!.project.set.routes).toHaveLength(4);
+    expect(Object.keys(JSON.parse(storage.data.get(DRAFTS_KEY)!))).toHaveLength(2);
+    drafts.remove(room);
+    expect(drafts.get(room)).toBeNull();
+    expect(drafts.get(box)).not.toBeNull();
+  });
+
   it('без трас — чернетку скану прибрано; remove — теж', () => {
     const storage = memoryStorage();
     const drafts = createDrafts(storage);
