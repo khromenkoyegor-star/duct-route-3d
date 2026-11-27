@@ -391,6 +391,8 @@ export function createRouteTool(
       if (!next.routes.every(ok)) {
         throw new RangeError('Траси (і повітропроводи) мають бути за правилами, а nextId — більший за номери трас');
       }
+      // Траси замінюються цілком (відкрили проєкт чи чернетку): недобудована траса й редактор точки — закрити.
+      resetBuilding();
       set = {
         routes: next.routes.map((r) => ({ id: r.id, nodes: r.nodes.map((n) => ({ ...n })), duct: r.duct ?? null })),
         nextId: next.nextId,

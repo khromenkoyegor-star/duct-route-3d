@@ -282,12 +282,14 @@ test.describe('Траса: побудова полілінії', () => {
         nextId: 2,
       }),
     );
+    // «Файл» → «Відкрити скан або проєкт» (етап 6) → питання: траси лишаться в чернетці.
     await page.getByTestId('open-scan').click();
+    await page.getByTestId('menu-open').click();
     await expect(page.getByTestId('choice')).toBeVisible();
-    await expect(page.getByTestId('choice-text')).toContainText('траси');
+    await expect(page.getByTestId('choice-text')).toContainText('Траси цього скану лишаться в чернетці');
     await page.getByTestId('choice-cancel').click();
     expect((await routes(page)).set.routes).toHaveLength(1);
-    // Відкрили інший скан — траси прибрано, номери знову з 1.
+    // Відкрили скан ще раз — траси прибрано з екрана (лишились у чернетці), номери знову з 1.
     await page.getByTestId('file-input').setInputFiles(ROOM_ZIP);
     await page.waitForFunction(() => window.__trasa?.app?.state.routes.set.routes.length === 0);
     expect((await routes(page)).set.nextId).toBe(1);

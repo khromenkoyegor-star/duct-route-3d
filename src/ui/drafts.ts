@@ -26,6 +26,8 @@ export interface Draft {
 }
 
 export interface Drafts {
+  /** Чи є сховище (у приватному режимі чи без дозволу — немає, і чернетки не пишуться). */
+  readonly available: boolean;
   /** Чернетка для цього скану або null. */
   get(scan: ScanFingerprint): Draft | null;
   /** Записати чернетку проєкту (скан — у project.scan). Без трас — чернетку скану прибрати. */
@@ -67,6 +69,7 @@ export function createDrafts(storage: DraftStorage | null, now: () => Date = () 
   };
 
   return {
+    available: storage !== null,
     get(scan) {
       const entry = read()[scanKey(scan)];
       if (!entry || typeof entry.text !== 'string') return null;

@@ -929,14 +929,16 @@ test.describe('Етап 2 (tester): крайові випадки побудов
     await holdProfile(page, 'Z', 1, [[0.7, 300]]);
     // На iPhone вертикально кнопки внизу сховані під час побудови — «Відкрити скан» недоступна, це нормально.
     const open = page.getByTestId('open-scan');
-    test.skip(!(await open.isVisible()), 'кнопка «Відкрити скан» схована під час побудови (iPhone вертикально)');
+    test.skip(!(await open.isVisible()), 'кнопка «Файл» схована під час побудови (iPhone вертикально)');
     await open.click();
+    await page.getByTestId('menu-open').click();
     await expect(page.getByTestId('choice')).toBeVisible();
     await page.getByTestId('choice-cancel').click();
     let r = await routes(page);
     expect(r.building!.nodes).toHaveLength(2);
     expect(r.editor.active).toBe(true);
     await open.click();
+    await page.getByTestId('menu-open').click();
     const chooser = page.waitForEvent('filechooser');
     await page.getByTestId('choice-open').click();
     await (await chooser).setFiles(ROOM_ZIP);
@@ -962,9 +964,10 @@ test.describe('Етап 2 (tester): крайові випадки побудов
     await holdProfile(page, 'X', 1, [[0.7, 300]]);
     await confirm(page);
     const open = page.getByTestId('open-scan');
-    test.skip(!(await open.isVisible()), 'кнопка «Відкрити скан» схована під час побудови (iPhone вертикально)');
+    test.skip(!(await open.isVisible()), 'кнопка «Файл» схована під час побудови (iPhone вертикально)');
     const building = (await routes(page)).building!;
     await open.click();
+    await page.getByTestId('menu-open').click();
     const chooser = page.waitForEvent('filechooser');
     await page.getByTestId('choice-open').click();
     await (await chooser).setFiles({ name: 'broken.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from('glTF це не модель') });

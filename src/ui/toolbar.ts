@@ -49,7 +49,10 @@ export function createToolbar(handlers: ToolbarHandlers): Toolbar {
   element.className = 'toolbar';
   element.setAttribute('aria-label', 'Дії');
 
-  const open = makeButton('open-scan', ICON_OPEN, 'Відкрити скан', 'Відкрити', 'Відкрити', handlers.onOpen);
+  // «Файл» (етап 6): меню «Відкрити скан або проєкт» / «Зберегти проєкт». testid лишився від «Відкрити скан».
+  const open = makeButton('open-scan', ICON_OPEN, 'Файл', 'Файл', 'Файл', handlers.onOpen);
+  open.setAttribute('aria-label', 'Файл: відкрити скан чи проєкт, зберегти проєкт');
+  open.setAttribute('aria-haspopup', 'menu');
   open.classList.add('tool-button--primary');
   const showAll = makeButton('show-all', ICON_SHOW_ALL, 'Показати все', 'Показати все', 'Усе', handlers.onShowAll);
   const ruler = makeButton('ruler', ICON_RULER, 'Рулетка', 'Рулетка', 'Рулетка', handlers.onRuler);

@@ -156,3 +156,187 @@ export function createChoice(): Choice {
     hide,
   };
 }
+
+// ───────────────────────── Меню «Файл» (етап 6) ─────────────────────────
+
+export interface MenuItem {
+  label: string;
+  testid: string;
+  /** Викликається одразу в обробнику натискання (важливо для «Файлів» і «Поділитися» на iOS). */
+  onSelect(): void;
+}
+
+export interface Menu {
+  element: HTMLElement;
+  readonly open: boolean;
+  /** Показати пункти біля кнопки `anchor`: під нею, а якщо вона внизу екрана (iPhone) — над нею. */
+  show(anchor: HTMLElement, items: readonly MenuItem[]): void;
+  hide(): void;
+}
+
+/**
+ * Маленьке меню в стилі iOS: лише потрібні пункти, без «Скасувати» — закривається дотиком будь-де поза
+ * ним (або Esc на клавіатурі iPad).
+ */
+export function createMenu(label: string): Menu {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'menu-backdrop';
+  backdrop.dataset.testid = 'menu';
+  backdrop.hidden = true;
+  const panel = document.createElement('div');
+  panel.className = 'menu';
+  panel.setAttribute('role', 'menu');
+  panel.setAttribute('aria-label', label);
+  backdrop.append(panel);
+
+  const hide = () => {
+    backdrop.hidden = true;
+    panel.replaceChildren();
+  };
+  // Дотик поза меню лише закриває його (не натискає те, що під ним).
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop) hide();
+  });
+  backdrop.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hide();
+  });
+
+  return {
+    element: backdrop,
+    get open() {
+      return !backdrop.hidden;
+    },
+    show(anchor, items) {
+      panel.replaceChildren(
+        ...items.map((item) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'menu-item';
+          button.dataset.testid = item.testid;
+          button.setAttribute('role', 'menuitem');
+          button.textContent = item.label;
+          button.addEventListener('click', () => {
+            hide();
+            item.onSelect();
+          });
+          return button;
+        }),
+      );
+      backdrop.hidden = false;
+      // Біля кнопки: під нею, а якщо кнопка в нижній половині екрана (панель iPhone) — над нею.
+      const r = anchor.getBoundingClientRect();
+      const host = backdrop.getBoundingClientRect();
+      const gap = 8;
+      if (r.top - host.top > host.height / 2) {
+        panel.style.top = '';
+        panel.style.bottom = `${host.bottom - r.top + gap}px`;
+      } else {
+        panel.style.bottom = '';
+        panel.style.top = `${r.bottom - host.top + gap}px`;
+      }
+      const width = panel.offsetWidth;
+      const left = Math.min(Math.max(r.left - host.left, gap), Math.max(gap, host.width - width - gap));
+      panel.style.left = `${left}px`;
+      panel.querySelector<HTMLButtonElement>('button')?.focus({ focusVisible: false } as FocusOptions);
+    },
+    hide,
+  };
+}
+
+// ───────────────────────── Віконце з полем (назва проєкту) ─────────────────────────
+
+export interface PromptOptions {
+  title: string;
+  message?: string;
+  value: string;
+  okLabel: string;
+  onOk(value: string): void;
+}
+
+export interface Prompt {
+  element: HTMLElement;
+  readonly open: boolean;
+  show(options: PromptOptions): void;
+  hide(): void;
+}
+
+/** Віконце «Назва проєкту» з полем і кнопками «Скасувати» / «Зберегти» (Enter — те саме, що «Зберегти»). */
+export function createPrompt(): Prompt {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'backdrop';
+  backdrop.dataset.testid = 'prompt';
+  backdrop.hidden = true;
+  const card = document.createElement('form');
+  card.className = 'card card--alert card--choice';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
+  card.noValidate = true;
+  const title = document.createElement('h2');
+  title.className = 'card-title';
+  title.id = 'prompt-title';
+  card.setAttribute('aria-labelledby', title.id);
+  const text = document.createElement('p');
+  text.className = 'card-text';
+  const field = document.createElement('input');
+  field.type = 'text';
+  // 17 px: менший шрифт у полі змушує Safari на iPhone збільшувати сторінку.
+  field.className = 'card-input';
+  field.dataset.testid = 'prompt-input';
+  field.autocomplete = 'off';
+  field.enterKeyHint = 'done';
+  field.setAttribute('aria-labelledby', title.id);
+  const actions = document.createElement('div');
+  actions.className = 'card-actions card-actions--row';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'card-button card-button--cancel';
+  cancel.dataset.testid = 'prompt-cancel';
+  cancel.textContent = 'Скасувати';
+  const ok = document.createElement('button');
+  ok.type = 'submit';
+  ok.className = 'card-button card-button--default';
+  ok.dataset.testid = 'prompt-ok';
+  actions.append(cancel, ok);
+  card.append(title, text, field, actions);
+  backdrop.append(card);
+
+  let onOk: ((value: string) => void) | null = null;
+  const hide = () => {
+    backdrop.hidden = true;
+    onOk = null;
+  };
+  const sync = () => {
+    ok.disabled = field.value.trim() === '';
+  };
+  field.addEventListener('input', sync);
+  cancel.addEventListener('click', hide);
+  card.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = field.value.trim();
+    if (!value || !onOk) return;
+    const done = onOk;
+    hide();
+    done(value);
+  });
+
+  return {
+    element: backdrop,
+    get open() {
+      return !backdrop.hidden;
+    },
+    show(options) {
+      title.textContent = options.title;
+      text.textContent = options.message ?? '';
+      text.hidden = !options.message;
+      field.value = options.value;
+      ok.textContent = options.okLabel;
+      onOk = options.onOk;
+      sync();
+      backdrop.hidden = false;
+      // Курсор у полі, текст виділено — можна одразу надрукувати свою назву або просто натиснути «Зберегти».
+      field.focus();
+      field.select();
+    },
+    hide,
+  };
+}

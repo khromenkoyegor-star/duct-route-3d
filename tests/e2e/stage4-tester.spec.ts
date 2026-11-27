@@ -535,6 +535,8 @@ test.describe('Етап 4 (tester): критерії готовності', () =
     // Інший скан (GLB) — без панелі, як після «Відкрити».
     await page.getByTestId('file-input').setInputFiles(ROOM_GLB);
     await page.waitForFunction(() => window.__trasa?.app?.state.status === 'ready' && window.__trasa.app.state.scanName?.endsWith('.glb'));
+    // Це та сама кімната (GLB): з етапу 6 програма пропонує повернути траси з чернетки — тут «Почати заново».
+    await page.getByTestId('choice-fresh').click();
     mats = await scanMaterials(page);
     expect(mats.some((m) => before.has(m.uuid)), 'це матеріали нового скану').toBe(false);
     for (const m of mats) {
